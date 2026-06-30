@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Log files
+*.log
+
+# Claude Code local settings
+.claude/
+
+# Internal production docs
+video-build/
+Sample-resource/
+plan.md
