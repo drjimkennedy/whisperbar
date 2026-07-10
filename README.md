@@ -21,17 +21,23 @@ A menu-bar icon (`🎙`) shows you what's happening. One hotkey starts and stops
 
 ## Prerequisites
 
-### Python packages
+### Python environment
 
 ```bash
-pip install sounddevice numpy scipy openai-whisper pyperclip pyautogui rumps pynput
+/usr/bin/python3 -m venv .venv
+.venv/bin/python3 -m pip install --upgrade pip
+.venv/bin/python3 -m pip install -r requirements.txt
 ```
 
-### System (Homebrew)
+### Optional Whisper command-line tooling
 
 ```bash
 brew install ffmpeg
 ```
+
+WhisperBar passes in-memory audio directly to Whisper and does not require
+`ffmpeg` for normal dictation. It is useful if you also use Whisper's CLI with
+audio files.
 
 ### macOS permissions
 
@@ -48,7 +54,7 @@ Go to **System Settings → Privacy & Security** and grant:
 ## Run it
 
 ```bash
-python3 app.py
+./launch.sh
 ```
 
 The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, press again to transcribe and paste.
@@ -57,12 +63,13 @@ The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, p
 
 ## Configuration
 
-Edit `config.py` — three settings, nothing else needs touching:
+Edit `config.py` — four settings, nothing else needs touching:
 
 ```python
 SHORTCUT_KEY = "option+space"   # change if it conflicts
 WHISPER_MODEL = "base"          # tiny / base / small / medium / large
 SAMPLE_RATE = 16000             # what Whisper expects — leave this alone
+MAX_RECORDING_SECONDS = 300     # prevents unbounded memory use
 ```
 
 `WHISPER_MODEL` is the speed-vs-accuracy dial. `base` is the sweet spot for most people — feels near-instant and accurate enough for normal speech.
@@ -73,38 +80,21 @@ SAMPLE_RATE = 16000             # what Whisper expects — leave this alone
 
 So the icon is just always there — no terminal, no ritual.
 
-1. Edit `launch.sh` if needed (it uses `$(dirname "$0")` so it works from any location)
-2. Create a launchd agent:
+The repository includes a crash-recovering launchd definition at
+`launchd/com.drjk.whisperbar.plist`. It restarts unexpected failures but still
+allows a normal **Quit WhisperBar** to remain stopped.
+
+1. If this repository is somewhere other than `/Users/jimkennedy/code/whisper`,
+   update the paths in the plist.
+2. Install and start it:
 
 ```bash
-cat > ~/Library/LaunchAgents/com.drjk.whisperbar.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.drjk.whisperbar</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/zsh</string>
-        <string>/path/to/whisperbar/launch.sh</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/tmp/whisperbar.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/whisperbar.log</string>
-</dict>
-</plist>
-EOF
+cp launchd/com.drjk.whisperbar.plist ~/Library/LaunchAgents/
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.drjk.whisperbar.plist 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.drjk.whisperbar.plist
 ```
 
-Replace `/path/to/whisperbar/` with the actual path, then load it:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.drjk.whisperbar.plist
-```
+Logs are written to `whisperbar.log` and automatically rotated.
 
 ---
 
@@ -118,7 +108,18 @@ Built with Claude using the 90/500 Method: your judgment writes the spec, Claude
 
 ## Extending it
 
-These were deliberately left out — each slots in without changing the signal chain:
+The application now uses guarded `starting`, `idle`, `recording`,
+`transcribing`, and `error` states. Repeated hotkeys cannot start overlapping
+recordings or Whisper jobs. Audio is passed directly to Whisper as a NumPy
+array, so transcription does not depend on a temporary WAV file or `ffmpeg`.
+
+Run the test suite with:
+
+```bash
+.venv/bin/python3 -m unittest discover -s tests -v
+```
+
+Possible extensions:
 
 - **Push-to-talk mode** — a config flag branching in `toggle()`
 - **Multi-language** — remove the hard-pinned `language="en"` in `config.py`

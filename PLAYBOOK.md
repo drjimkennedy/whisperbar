@@ -22,12 +22,11 @@ All already installed on this machine:
 | `openai-whisper` | Transcription engine | pip |
 | `sounddevice` | Mic capture | pip |
 | `numpy` | Audio array handling | pip |
-| `scipy` | WAV file writing | pip |
 | `pyperclip` | Clipboard write | pip |
 | `pyautogui` | Simulate ⌘V paste | pip |
 | `rumps` | macOS menu bar UI | pip |
 | `pynput` | Global hotkey listener | pip |
-| `ffmpeg` | Audio decode (Whisper dependency) | Homebrew |
+| `ffmpeg` | Optional Whisper CLI/file tooling | Homebrew |
 
 ---
 
@@ -47,15 +46,10 @@ Or directly:
 
 ```bash
 cd ~/code/whisper
-python3 app.py
+./launch.sh
 ```
 
-The terminal output confirms the model is loaded:
-
-```
-Loading Whisper model 'base'…
-Model loaded. Starting WhisperBar…
-```
+Startup and error details are written to `whisperbar.log`.
 
 ### macOS Permissions (first run only)
 
@@ -87,12 +81,13 @@ Click the menu bar icon at any time to see current status, shortcut, and model.
 
 ## Configuration
 
-All settings are in `config.py` — one file, three options:
+All settings are in `config.py` — one file, four options:
 
 ```python
 SHORTCUT_KEY = "option+space"   # change this if ⌥Space conflicts
 WHISPER_MODEL = "base"          # tiny / base / small / medium / large
 SAMPLE_RATE = 16000             # leave this alone — Whisper expects 16kHz
+MAX_RECORDING_SECONDS = 300     # bounds memory use if left recording
 ```
 
 **Shortcut format:** `modifier+key`
@@ -120,16 +115,17 @@ Change the model in `config.py`, then restart the app. Model files are cached at
     → audio_callback() appends mic frames to audio_frames[]
 
 ⌥Space pressed again
-    → recording flag set False, stream closed
-    → stop_and_transcribe() runs on a background thread
-    → numpy concatenates frames → int16 WAV written to temp file
-    → whisper model.transcribe() runs on the WAV
+    → guarded state changes to transcribing, stream closes
+    → transcription runs on a background thread
+    → recording buffer is detached from the live stream
+    → numpy concatenates frames into mono float32 audio
+    → whisper model.transcribe() runs directly on the array
     → text written to clipboard via pyperclip
     → pyautogui simulates ⌘V to paste
-    → temp file deleted, icon resets to 🎙
+    → icon resets to 🎙
 ```
 
-The hotkey listener (`pynput`) runs on its own daemon thread. Transcription also runs on a daemon thread so the menu bar UI never blocks.
+The hotkey listener (`pynput`) runs on its own daemon thread. Transcription also runs on a daemon thread so the menu bar UI never blocks. A guarded state machine prevents recording and transcription from overlapping, and UI changes are delivered to the macOS main thread through an event queue.
 
 ---
 
@@ -141,15 +137,16 @@ The hotkey listener (`pynput`) runs on its own daemon thread. Transcription also
 
 **Text doesn't paste**
 - Accessibility permission is the usual cause — see above
-- The 0.15s delay before paste (`time.sleep(0.15)`) gives focus time to return to the previous app; if your machine is slow, bump this to `0.3` in `app.py:72`
+- The 0.15s delay in `paste_text()` gives focus time to return to the previous app; if your machine is slow, increase it in `app.py`
 
 **Transcription is slow**
 - You're probably on `small` or larger — switch back to `base` in `config.py`
 - On Apple Silicon, Whisper runs on CPU by default (`fp16=False` is set intentionally for MPS compatibility)
 
-**`🔴` stays on / app seems stuck**
-- A crash during transcription can leave the icon stuck — quit from the menu bar and relaunch
-- Check Terminal output for the Python traceback
+**`⚠️` appears / app reports an error**
+- Click the menu icon to see the most recent error
+- Check `whisperbar.log` for the full timestamped traceback
+- Fix the reported permission/device problem, then press the shortcut to retry
 
 **`⌥Space` conflict**
 - macOS Spotlight sometimes claims `⌥Space` — check System Settings → Keyboard Shortcuts → Spotlight
@@ -167,12 +164,12 @@ WhisperBar is registered as a launchd agent — it starts automatically when you
 
 **To stop auto-start:**
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.drjk.whisperbar.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.drjk.whisperbar.plist
 ```
 
 **To re-enable auto-start:**
 ```bash
-launchctl load ~/Library/LaunchAgents/com.drjk.whisperbar.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.drjk.whisperbar.plist
 ```
 
 **Logs** (if something goes wrong at startup):
@@ -187,7 +184,7 @@ cat ~/code/whisper/whisperbar.log
 `whisperbar` is aliased in `~/.zshrc`:
 
 ```bash
-alias whisperbar="cd ~/code/whisper && python3 app.py"
+alias whisperbar="cd ~/code/whisper && ./launch.sh"
 ```
 
 Useful if you ever need to relaunch manually from a terminal (e.g. after a crash or config change).
@@ -199,8 +196,11 @@ Useful if you ever need to relaunch manually from a terminal (e.g. after a crash
 ```
 ~/code/whisper/
 ├── app.py              — full app (audio, transcription, menu bar, hotkey)
+├── whisperbar_core.py  — guarded recording/transcription controller
 ├── config.py           — shortcut, model, sample rate
 ├── launch.sh           — shell wrapper for launchd auto-start
+├── requirements.txt    — pinned direct dependencies
+├── tests/              — state, failure, race, and shortcut tests
 ├── whisperbar.log      — stdout/stderr from auto-start launches
 ├── plan.md             — original build plan and decisions log
 └── PLAYBOOK.md         — this file

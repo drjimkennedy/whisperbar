@@ -4,6 +4,11 @@
 # Log files
 *.log
 
+# Local Python environment and caches
+.venv/
+__pycache__/
+.pytest_cache/
+
 # Claude Code local settings
 .claude/
 

@@ -1,0 +1,10 @@
+# Direct runtime dependencies. Install into .venv with:
+#   /usr/bin/python3 -m venv .venv
+#   .venv/bin/python3 -m pip install -r requirements.txt
+numpy==2.0.2
+openai-whisper==20240930
+PyAutoGUI==0.9.54
+pyperclip==1.11.0
+pynput==1.8.1
+rumps==0.4.0
+sounddevice==0.5.5

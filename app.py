@@ -1,169 +1,221 @@
-"""
-WhisperBar — system-wide dictation via menu bar.
+"""WhisperBar — system-wide macOS dictation from the menu bar."""
 
-Shortcut: Option+Space (configurable via SHORTCUT in config.py)
-- Press once to start recording (icon turns red)
-- Press again to stop, transcribe, and paste
-"""
+from __future__ import annotations
 
-import threading
-import tempfile
+import fcntl
+import logging
+from logging.handlers import RotatingFileHandler
 import os
+from pathlib import Path
+from queue import Empty, Queue
+import sys
+import threading
 import time
-import numpy as np
-import sounddevice as sd
-import scipy.io.wavfile as wav
-import whisper
-import pyperclip
+
 import pyautogui
+import pyperclip
 import rumps
+import sounddevice as sd
+import whisper
 from pynput import keyboard
 
-from config import SHORTCUT_KEY, SAMPLE_RATE, WHISPER_MODEL
-
-# ── State ─────────────────────────────────────────────────────────────────────
-
-recording = False
-audio_frames = []
-stream = None
-model = None
-
-# ── Audio ──────────────────────────────────────────────────────────────────────
-
-def audio_callback(indata, frames, time_info, status):
-    if recording:
-        audio_frames.append(indata.copy())
+from config import MAX_RECORDING_SECONDS, SAMPLE_RATE, SHORTCUT_KEY, WHISPER_MODEL
+from whisperbar_core import AppState, DictationController
 
 
-def start_recording():
-    global recording, audio_frames, stream
-    audio_frames = []
-    recording = True
-    stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, callback=audio_callback)
-    stream.start()
+APP_DIR = Path(__file__).resolve().parent
+LOG_PATH = APP_DIR / "whisperbar.log"
+UI_POLL_SECONDS = 0.1
 
 
-def stop_and_transcribe(app_ref):
-    global recording, stream
-    recording = False
-    if stream:
-        stream.stop()
-        stream.close()
-        stream = None
+def configure_logging() -> logging.Logger:
+    logger = logging.getLogger("whisperbar")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=3)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(threadName)s %(message)s")
+        )
+        logger.addHandler(handler)
+    return logger
 
-    if not audio_frames:
-        app_ref.set_idle()
-        return
 
-    app_ref.title = "⏳"
+LOGGER = configure_logging()
 
-    audio_data = np.concatenate(audio_frames, axis=0)
-    audio_data = (audio_data * 32767).astype(np.int16)
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        tmp_path = f.name
-    wav.write(tmp_path, SAMPLE_RATE, audio_data)
-
+def acquire_single_instance():
+    """Hold a per-user lock for the lifetime of the process."""
+    lock_path = Path("/tmp") / f"whisperbar-{os.getuid()}.lock"
+    lock_file = lock_path.open("w")
     try:
-        result = model.transcribe(tmp_path, language="en", fp16=False)
-        text = result["text"].strip()
-        if text:
-            pyperclip.copy(text)
-            time.sleep(0.15)  # brief pause so focus returns to original app
-            pyautogui.hotkey("command", "v")
-    finally:
-        os.unlink(tmp_path)
-        app_ref.set_idle()
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        return None
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+    return lock_file
 
 
-# ── Menu bar app ───────────────────────────────────────────────────────────────
+def pynput_shortcut(shortcut: str) -> str:
+    """Translate the documented shortcut syntax to pynput's HotKey syntax."""
+    aliases = {
+        "option": "alt",
+        "command": "cmd",
+        "control": "ctrl",
+        "return": "enter",
+    }
+    special = {"alt", "cmd", "ctrl", "shift", "space", "tab", "enter"}
+    converted = []
+    for raw_part in shortcut.split("+"):
+        part = aliases.get(raw_part.strip().lower(), raw_part.strip().lower())
+        if not part:
+            raise ValueError("shortcut contains an empty key")
+        if part in special:
+            converted.append(f"<{part}>")
+        elif len(part) == 1:
+            converted.append(part)
+        else:
+            raise ValueError(f"unsupported shortcut key: {raw_part!r}")
+    if len(converted) < 2:
+        raise ValueError("shortcut must include a modifier and a key")
+    return "+".join(converted)
+
+
+def paste_text(text: str) -> None:
+    pyperclip.copy(text)
+    time.sleep(0.15)
+    pyautogui.hotkey("command", "v")
+
 
 class WhisperBar(rumps.App):
-    def __init__(self):
-        super().__init__("🎙", quit_button="Quit WhisperBar")
+    def __init__(self) -> None:
+        super().__init__("⏳", quit_button="Quit WhisperBar")
         self.menu = [
-            rumps.MenuItem("Status: idle"),
-            None,  # separator
+            rumps.MenuItem("Status: starting…"),
+            rumps.MenuItem("Last error: none"),
+            None,
             rumps.MenuItem(f"Shortcut: {SHORTCUT_KEY}"),
             rumps.MenuItem(f"Model: {WHISPER_MODEL}"),
         ]
-        self._status_item = self.menu["Status: idle"]
+        self._status_item = self.menu["Status: starting…"]
+        self._error_item = self.menu["Last error: none"]
+        self._events = Queue()
+        self._controller = None
+        self._controller_lock = threading.Lock()
+        self._listener = None
+        self._timer = rumps.Timer(self._process_events, UI_POLL_SECONDS)
+        self._timer.start()
 
-    def set_idle(self):
-        self.title = "🎙"
-        self._status_item.title = "Status: idle"
+    def enqueue_state(self, state: AppState, message=None) -> None:
+        self._events.put(("state", state, message))
 
-    def set_recording(self):
-        self.title = "🔴"
-        self._status_item.title = "Status: recording…"
+    def enqueue_ready(self, controller, listener) -> None:
+        self._events.put(("ready", controller, listener))
 
-    def toggle(self):
-        global recording
-        if not recording:
-            self.set_recording()
-            start_recording()
-        else:
-            threading.Thread(target=stop_and_transcribe, args=(self,), daemon=True).start()
+    def request_toggle(self) -> None:
+        with self._controller_lock:
+            controller = self._controller
+        if controller is None:
+            LOGGER.info("Ignoring hotkey while application is starting")
+            return
+        controller.toggle()
 
+    def _process_events(self, _timer) -> None:
+        while True:
+            try:
+                event = self._events.get_nowait()
+            except Empty:
+                break
+            kind = event[0]
+            if kind == "ready":
+                with self._controller_lock:
+                    self._controller = event[1]
+                    self._listener = event[2]
+                self._render_state(AppState.IDLE)
+            else:
+                self._render_state(event[1], event[2])
 
-# ── Hotkey listener ────────────────────────────────────────────────────────────
+    def _render_state(self, state: AppState, message=None) -> None:
+        appearances = {
+            AppState.STARTING: ("⏳", "Status: starting…"),
+            AppState.IDLE: ("🎙", "Status: idle"),
+            AppState.RECORDING: ("🔴", "Status: recording…"),
+            AppState.TRANSCRIBING: ("⏳", "Status: transcribing…"),
+            AppState.ERROR: ("⚠️", "Status: error"),
+        }
+        self.title, self._status_item.title = appearances[state]
+        if message:
+            self._error_item.title = f"Last error: {message}"
 
-def parse_shortcut(shortcut_str):
-    """Parse 'option+space' into pynput Key combination."""
-    parts = [p.strip().lower() for p in shortcut_str.split("+")]
-    modifiers = set()
-    key = None
-    modifier_map = {
-        "option": keyboard.Key.alt,
-        "alt": keyboard.Key.alt,
-        "cmd": keyboard.Key.cmd,
-        "command": keyboard.Key.cmd,
-        "ctrl": keyboard.Key.ctrl,
-        "control": keyboard.Key.ctrl,
-        "shift": keyboard.Key.shift,
-    }
-    key_map = {
-        "space": keyboard.Key.space,
-        "tab": keyboard.Key.tab,
-        "return": keyboard.Key.enter,
-        "enter": keyboard.Key.enter,
-    }
-    for part in parts:
-        if part in modifier_map:
-            modifiers.add(modifier_map[part])
-        elif part in key_map:
-            key = key_map[part]
-        else:
-            key = keyboard.KeyCode.from_char(part)
-    return modifiers, key
-
-
-def start_hotkey_listener(app_ref):
-    required_modifiers, trigger_key = parse_shortcut(SHORTCUT_KEY)
-    pressed = set()
-
-    def on_press(k):
-        pressed.add(k)
-        if trigger_key in pressed and required_modifiers.issubset(pressed):
-            app_ref.toggle()
-
-    def on_release(k):
-        pressed.discard(k)
-
-    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        listener.join()
+    def shutdown(self) -> None:
+        with self._controller_lock:
+            controller = self._controller
+        if controller is not None:
+            controller.close()
+        if self._listener is not None:
+            self._listener.stop()
 
 
-# ── Entry point ────────────────────────────────────────────────────────────────
+def start_hotkey_listener(app: WhisperBar):
+    combination = pynput_shortcut(SHORTCUT_KEY)
+    parsed = keyboard.HotKey.parse(combination)
+    hotkey = keyboard.HotKey(parsed, app.request_toggle)
+    listener = keyboard.Listener(
+        on_press=lambda key: hotkey.press(listener.canonical(key)),
+        on_release=lambda key: hotkey.release(listener.canonical(key)),
+    )
+    listener.start()
+    return listener
+
+
+def initialize(app: WhisperBar) -> None:
+    try:
+        try:
+            sd.check_input_settings(samplerate=SAMPLE_RATE, channels=1)
+        except Exception as exc:
+            LOGGER.warning("Microphone preflight failed: %s", exc)
+            app.enqueue_state(AppState.ERROR, f"Microphone check failed: {exc}")
+
+        LOGGER.info("Loading Whisper model %s", WHISPER_MODEL)
+        model = whisper.load_model(WHISPER_MODEL)
+        controller = DictationController(
+            audio_module=sd,
+            model=model,
+            paste_text=paste_text,
+            state_callback=app.enqueue_state,
+            sample_rate=SAMPLE_RATE,
+            max_recording_seconds=MAX_RECORDING_SECONDS,
+            logger=LOGGER,
+        )
+        listener = start_hotkey_listener(app)
+        app.enqueue_ready(controller, listener)
+        LOGGER.info("WhisperBar ready")
+    except Exception as exc:
+        LOGGER.exception("WhisperBar initialization failed")
+        app.enqueue_state(AppState.ERROR, f"Startup failed: {exc}")
+
+
+def main() -> int:
+    instance_lock = acquire_single_instance()
+    if instance_lock is None:
+        LOGGER.error("Another WhisperBar instance is already running")
+        return 2
+
+    LOGGER.info("Starting WhisperBar with %s", sys.executable)
+    app = WhisperBar()
+    initializer = threading.Thread(
+        target=initialize, args=(app,), name="whisperbar-initialize", daemon=True
+    )
+    initializer.start()
+    try:
+        app.run()
+    finally:
+        app.shutdown()
+        instance_lock.close()
+        LOGGER.info("WhisperBar stopped")
+    return 0
+
 
 if __name__ == "__main__":
-    print(f"Loading Whisper model '{WHISPER_MODEL}'…")
-    model = whisper.load_model(WHISPER_MODEL)
-    print("Model loaded. Starting WhisperBar…")
-
-    app = WhisperBar()
-
-    hotkey_thread = threading.Thread(target=start_hotkey_listener, args=(app,), daemon=True)
-    hotkey_thread.start()
-
-    app.run()
+    raise SystemExit(main())
