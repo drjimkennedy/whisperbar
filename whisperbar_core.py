@@ -33,6 +33,8 @@ class DictationController:
         state_callback: StateCallback,
         sample_rate: int = 16_000,
         max_recording_seconds: int = 300,
+        input_device=None,
+        silence_threshold: float = 0.001,
         language: Optional[str] = "en",
         logger: Optional[logging.Logger] = None,
         thread_factory=threading.Thread,
@@ -43,6 +45,8 @@ class DictationController:
         self._state_callback = state_callback
         self._sample_rate = sample_rate
         self._max_samples = sample_rate * max_recording_seconds
+        self._input_device = input_device
+        self._silence_threshold = silence_threshold
         self._language = language
         self._logger = logger or logging.getLogger(__name__)
         self._thread_factory = thread_factory
@@ -52,6 +56,7 @@ class DictationController:
         self._frames: List[np.ndarray] = []
         self._stream = None
         self._captured_samples = 0
+        self._peak_level = 0.0
         self._limit_reported = False
 
     @property
@@ -84,6 +89,7 @@ class DictationController:
             self._stream = None
             self._frames = []
             self._captured_samples = 0
+            self._peak_level = 0.0
             self._state = AppState.IDLE
         if stream is not None:
             self._close_stream(stream)
@@ -103,6 +109,9 @@ class DictationController:
                     frame = indata[:remaining].copy()
                     self._frames.append(frame)
                     self._captured_samples += len(frame)
+                    self._peak_level = max(
+                        self._peak_level, float(np.max(np.abs(frame), initial=0.0))
+                    )
                 elif not self._limit_reported:
                     self._logger.warning("Maximum recording length reached")
                     self._limit_reported = True
@@ -113,11 +122,13 @@ class DictationController:
                 samplerate=self._sample_rate,
                 channels=1,
                 dtype="float32",
+                device=self._input_device,
                 callback=self._audio_callback,
             )
             with self._lock:
                 self._frames = []
                 self._captured_samples = 0
+                self._peak_level = 0.0
                 self._limit_reported = False
                 self._stream = stream
                 self._state = AppState.RECORDING
@@ -152,9 +163,22 @@ class DictationController:
         with self._lock:
             captured_frames = self._frames
             self._frames = []
+            peak_level = self._peak_level
+            self._peak_level = 0.0
 
         if not captured_frames:
             self._set_state(AppState.ERROR, "No audio was captured")
+            return
+        self._logger.info(
+            "Recording stopped (samples=%d, peak=%.5f)",
+            sum(len(frame) for frame in captured_frames),
+            peak_level,
+        )
+        if peak_level < self._silence_threshold:
+            self._set_state(
+                AppState.ERROR,
+                "No audible input — check the microphone permission and input device",
+            )
             return
 
         self._state_callback(AppState.TRANSCRIBING, None)
@@ -177,7 +201,10 @@ class DictationController:
             result = self._model.transcribe(audio, **options)
             text = result.get("text", "").strip()
             if text:
+                self._logger.info("Transcription completed (characters=%d)", len(text))
                 self._paste_text(text)
+            else:
+                self._logger.info("Transcription completed with no detected speech")
             self._set_state(AppState.IDLE)
         except Exception as exc:
             self._logger.exception("Transcription or paste failed")

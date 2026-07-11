@@ -63,13 +63,16 @@ The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, p
 
 ## Configuration
 
-Edit `config.py` — four settings, nothing else needs touching:
+Edit `config.py` — seven settings, nothing else needs touching:
 
 ```python
 SHORTCUT_KEY = "option+space"   # change if it conflicts
 WHISPER_MODEL = "base"          # tiny / base / small / medium / large
 SAMPLE_RATE = 16000             # what Whisper expects — leave this alone
+INPUT_DEVICE = None              # use macOS default, or an exact input-device name
 MAX_RECORDING_SECONDS = 300     # prevents unbounded memory use
+PASTE_DELAY_SECONDS = 0.35      # wait before simulated ⌘V
+SILENCE_THRESHOLD = 0.001       # flags a silent/wrong microphone
 ```
 
 `WHISPER_MODEL` is the speed-vs-accuracy dial. `base` is the sweet spot for most people — feels near-instant and accurate enough for normal speech.

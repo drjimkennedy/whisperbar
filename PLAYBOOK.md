@@ -81,13 +81,16 @@ Click the menu bar icon at any time to see current status, shortcut, and model.
 
 ## Configuration
 
-All settings are in `config.py` — one file, four options:
+All settings are in `config.py` — one file, seven options:
 
 ```python
 SHORTCUT_KEY = "option+space"   # change this if ⌥Space conflicts
 WHISPER_MODEL = "base"          # tiny / base / small / medium / large
 SAMPLE_RATE = 16000             # leave this alone — Whisper expects 16kHz
+INPUT_DEVICE = None              # use macOS default or an exact input-device name
 MAX_RECORDING_SECONDS = 300     # bounds memory use if left recording
+PASTE_DELAY_SECONDS = 0.35      # wait before simulated ⌘V
+SILENCE_THRESHOLD = 0.001       # flags a silent/wrong microphone
 ```
 
 **Shortcut format:** `modifier+key`
@@ -137,7 +140,7 @@ The hotkey listener (`pynput`) runs on its own daemon thread. Transcription also
 
 **Text doesn't paste**
 - Accessibility permission is the usual cause — see above
-- The 0.15s delay in `paste_text()` gives focus time to return to the previous app; if your machine is slow, increase it in `app.py`
+- The configurable `PASTE_DELAY_SECONDS` gives focus time to settle before ⌘V; increase it in `config.py` if needed.
 
 **Transcription is slow**
 - You're probably on `small` or larger — switch back to `base` in `config.py`

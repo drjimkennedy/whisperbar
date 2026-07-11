@@ -19,7 +19,15 @@ import sounddevice as sd
 import whisper
 from pynput import keyboard
 
-from config import MAX_RECORDING_SECONDS, SAMPLE_RATE, SHORTCUT_KEY, WHISPER_MODEL
+from config import (
+    INPUT_DEVICE,
+    MAX_RECORDING_SECONDS,
+    PASTE_DELAY_SECONDS,
+    SAMPLE_RATE,
+    SILENCE_THRESHOLD,
+    SHORTCUT_KEY,
+    WHISPER_MODEL,
+)
 from whisperbar_core import AppState, DictationController
 
 
@@ -83,9 +91,12 @@ def pynput_shortcut(shortcut: str) -> str:
 
 
 def paste_text(text: str) -> None:
+    LOGGER.info("Copying transcript to clipboard (characters=%d)", len(text))
     pyperclip.copy(text)
-    time.sleep(0.15)
+    time.sleep(PASTE_DELAY_SECONDS)
+    LOGGER.info("Sending Command-V to the foreground application")
     pyautogui.hotkey("command", "v")
+    LOGGER.info("Paste shortcut sent")
 
 
 class WhisperBar(rumps.App):
@@ -97,6 +108,7 @@ class WhisperBar(rumps.App):
             None,
             rumps.MenuItem(f"Shortcut: {SHORTCUT_KEY}"),
             rumps.MenuItem(f"Model: {WHISPER_MODEL}"),
+            rumps.MenuItem(f"Input: {INPUT_DEVICE or 'system default'}"),
         ]
         self._status_item = self.menu["Status: starting…"]
         self._error_item = self.menu["Last error: none"]
@@ -172,7 +184,11 @@ def start_hotkey_listener(app: WhisperBar):
 def initialize(app: WhisperBar) -> None:
     try:
         try:
-            sd.check_input_settings(samplerate=SAMPLE_RATE, channels=1)
+            sd.check_input_settings(
+                device=INPUT_DEVICE, samplerate=SAMPLE_RATE, channels=1
+            )
+            selected_input = sd.query_devices(INPUT_DEVICE, "input")["name"]
+            LOGGER.info("Using input device: %s", selected_input)
         except Exception as exc:
             LOGGER.warning("Microphone preflight failed: %s", exc)
             app.enqueue_state(AppState.ERROR, f"Microphone check failed: {exc}")
@@ -186,6 +202,8 @@ def initialize(app: WhisperBar) -> None:
             state_callback=app.enqueue_state,
             sample_rate=SAMPLE_RATE,
             max_recording_seconds=MAX_RECORDING_SECONDS,
+            input_device=INPUT_DEVICE,
+            silence_threshold=SILENCE_THRESHOLD,
             logger=LOGGER,
         )
         listener = start_hotkey_listener(app)

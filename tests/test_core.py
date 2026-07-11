@@ -159,6 +159,17 @@ class ControllerTests(unittest.TestCase):
             self.model.calls[0][0], np.array([0.1, 0.2], dtype=np.float32)
         )
 
+    def test_silent_recording_reports_microphone_problem(self):
+        controller = self.make_controller()
+        controller.toggle()
+        self.audio.streams[0].feed([0.0, 0.0])
+
+        controller.toggle()
+
+        self.assertEqual(controller.state, AppState.ERROR)
+        self.assertIn("No audible input", self.states[-1][1])
+        self.assertEqual(self.model.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

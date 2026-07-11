@@ -13,5 +13,16 @@ WHISPER_MODEL = "base"
 # Audio sample rate — 16000 is what Whisper expects natively
 SAMPLE_RATE = 16000
 
+# Use the macOS default input when None. Set this to an exact device name from
+# System Settings → Sound → Input if the default microphone is not the one used.
+# Example: "Judge Jumbo Microphone"
+INPUT_DEVICE = "MacBook Pro Microphone"
+
 # Bound memory use if recording is accidentally left running.
 MAX_RECORDING_SECONDS = 300
+
+# Gives macOS time to settle the foreground app after the global hotkey.
+PASTE_DELAY_SECONDS = 0.35
+
+# Treat recordings quieter than this as a microphone/input problem.
+SILENCE_THRESHOLD = 0.001
