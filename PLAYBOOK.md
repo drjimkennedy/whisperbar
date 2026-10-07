@@ -34,6 +34,7 @@ Grant the launching app/interpreter the applicable Microphone, Input Monitoring,
 | No microphone audio | Check permissions, selected/default input and mute status; refresh device list |
 | Shortcut does nothing | Check input/accessibility permissions and shortcut conflicts |
 | Text does not paste | Use Copy last transcript and paste manually. Check Accessibility and focus; persistent history and destination validation remain planned |
+| Microphone cleanup failed — restart app | Quit and relaunch; new recording and microphone refresh are deliberately blocked while the native stream state is uncertain |
 | App appears stuck | Use Cancel dictation and wait for inference to drain; inspect `whisperbar.log` if it does not recover |
 
 The current runtime logs are in `whisperbar.log` beside `app.py`. Logs rotate at approximately 1 MB with three backups; transcript text and raw audio are not logged by this app. Do not distribute logs without reviewing them.

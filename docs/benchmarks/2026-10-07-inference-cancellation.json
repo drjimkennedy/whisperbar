@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "fixture": "120 seconds synthetic silence",
+  "model": "small",
+  "device": "cpu",
+  "actual_inference_ran": true,
+  "inference_active_when_cancelled": true,
+  "cancel_accepted": true,
+  "cancel_call_ms": 0.055,
+  "new_session_rejected_while_draining": true,
+  "inference_seconds": 1.781,
+  "delivery_count": 0,
+  "retained_transcript": false,
+  "final_state": "idle",
+  "passed": true,
+  "scope": "Real cached-model compute with synthetic capture and spy output; no native Escape, physical mic, paste, or accuracy check."
+}

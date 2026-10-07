@@ -96,6 +96,9 @@ class WhisperBar(rumps.App):
         # Serialize the check and refresh against shortcut commands. Never reset
         # PortAudio while a capture is arming, recording, or being cleaned up.
         with self.controller.lock:
+            if self.controller.restart_required:
+                self.status_item.title = 'Status: microphone cleanup failed — restart app'
+                return
             if self.controller.state not in (State.IDLE, State.ERROR):
                 self.status_item.title = 'Status: finish or cancel before changing microphones'
                 return
@@ -116,6 +119,9 @@ class WhisperBar(rumps.App):
 
     def pick_mic(self, sender):
         with self.controller.lock:
+            if self.controller.restart_required:
+                self.status_item.title = 'Status: microphone cleanup failed — restart app'
+                return
             if self.controller.state not in (State.IDLE, State.ERROR):
                 self.status_item.title = 'Status: finish or cancel before changing microphones'
                 return

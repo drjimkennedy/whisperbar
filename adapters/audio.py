@@ -75,12 +75,14 @@ class Capture:
     def close(self):
         with self.lock:
             self.accepting = False
-        stream, self.stream = self.stream, None
+        stream = self.stream
         if stream is not None:
             try:
                 stream.stop()
             finally:
                 stream.close()
+                # Retain the handle if native close raises, so cleanup can retry.
+                self.stream = None
 
     def snapshot(self):
         with self.lock:

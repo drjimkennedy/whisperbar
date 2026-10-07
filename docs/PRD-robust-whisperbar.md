@@ -7,8 +7,8 @@
 
 ## NOW
 
-- [ ] Verify native microphone removal and permission failure handling against the implemented Stage 1 coordinator.
-- [ ] Verify cancellation during long real inference and output behaviour in additional target applications.
+- [ ] Complete the remaining platform matrix, including native microphone permission denial; Accessibility denial and manual clipboard recovery now pass.
+- [ ] Verify output in additional target applications and native cancellation timing; cancellation during actual synthetic-audio inference now passes.
 - [ ] Close the remaining Stage 1 checks before implementing Stage 2 persistent history and safer delivery.
 
 ## Executive Summary
@@ -207,3 +207,7 @@ When revising, preserve the original creation date, update Revised/status, disti
 2026-10-07 11:19 AEST: Stage 0 isolated setup, preflight, dependency pins, failure checks, and baseline measurement implemented. Manual paste succeeded on retry after an initial failure; retain that failure as an unresolved reliability issue. Historical environment-repair notes above describe the earlier state, now superseded by the isolated installation.
 
 2026-10-07: Stage 1 coordinator, adapters, cancellation, repeat protection, instance locking, limits, and paste feedback implemented. Twenty-four tests plus native startup, duplicate launch, and user-confirmed dictation/Escape cancellation passed. Extended native failure checks remain open; see the development log and lifecycle contract. In-memory Copy Last was brought forward from Stage 2; persistent history and safer destination handling remain planned.
+
+2026-10-07: Additional Stage 1 validation passed: actual cached-model inference cancellation, native AirPods removal detection, and subsequent Mac microphone dictation without restart. Fixed uncertain stream cleanup to retain/retry its handle and block new capture after persistent failure. Twenty-eight automated tests pass. Native permission revocation and broader application coverage remain open.
+
+2026-10-07: Native Accessibility-denial test passed: trust became false, transcription completed without automatic paste, and production output routing selected copy-only. Original permissions were restored and native trust returned true. Jim confirmed manual clipboard recovery; microphone permission revocation is a separate untested case.

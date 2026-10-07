@@ -197,6 +197,40 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(len(self.deliveries), 100)
         self.assertEqual(c.sequence, 100)
 
+    def test_persistent_cleanup_failure_blocks_new_capture_even_when_cancelled(self):
+        class UnclosableCapture(FakeCapture):
+            def close(self):
+                raise RuntimeError('native close failed')
+        c = self.make(UnclosableCapture())
+        self.record(c)
+        c.cancel()
+        self.finish(c)
+        self.assertEqual(c.state, State.ERROR)
+        self.assertTrue(c.restart_required)
+        self.assertIs(c.failed_capture, self.capture)
+        self.assertFalse(c.toggle())
+        self.assertEqual(c.sequence, 1)
+        self.assertEqual(self.deliveries, [])
+
+    def test_successful_cleanup_retry_allows_next_session(self):
+        class RetryCapture(FakeCapture):
+            calls = 0
+            def close(self):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError('transient stop error')
+                super().close()
+        c = self.make(RetryCapture())
+        self.record(c)
+        c.toggle()
+        self.finish(c)
+        self.assertEqual(c.state, State.ERROR)
+        self.assertFalse(c.restart_required)
+        self.record(c)
+        c.toggle()
+        self.finish(c)
+        self.assertEqual(self.deliveries, ['hello'])
+
 
 class ShortcutTests(unittest.TestCase):
     def test_auto_repeat_and_modifier_variations(self):

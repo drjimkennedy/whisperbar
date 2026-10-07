@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "native_accessibility_trusted": false,
+  "copy_requested": true,
+  "paste_key_requested": false,
+  "status": "Copied \u2014 enable Accessibility or paste manually",
+  "passed": true,
+  "scope": "Real macOS permission denied; clipboard and key injection replaced with spies. Does not prove actual clipboard/manual paste or native hotkey behaviour."
+}

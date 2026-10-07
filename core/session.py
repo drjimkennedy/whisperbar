@@ -54,6 +54,8 @@ class Coordinator:
         self.worker = None
         self.sequence = 0
         self.closed = False
+        self.restart_required = False
+        self.failed_capture = None
         self.last_text = None
         self.log = logging.getLogger('whisperbar')
 
@@ -64,6 +66,9 @@ class Coordinator:
     def toggle(self):
         with self.lock:
             if self.closed:
+                return False
+            if self.restart_required:
+                self.emit(Event(self.sequence, State.ERROR, 'Microphone cleanup failed — restart app'))
                 return False
             if self.state in (State.IDLE, State.ERROR):
                 self.sequence += 1
@@ -121,7 +126,9 @@ class Coordinator:
                 return
             self.session = None
             if not self.closed:
-                if session.cancelled.is_set():
+                if self.restart_required:
+                    self._set(State.ERROR, 'Microphone cleanup failed — restart app')
+                elif session.cancelled.is_set():
                     self._set(State.IDLE, 'Cancelled')
                 else:
                     self._set(state, message)
@@ -177,5 +184,8 @@ class Coordinator:
                     capture.close()
                 except Exception:
                     self.log.exception('Session %s capture cleanup failed', session.id)
+                    with self.lock:
+                        self.restart_required = True
+                        self.failed_capture = capture
                     terminal_state, message = State.ERROR, 'Microphone cleanup failed — restart app'
             self._finish(session, terminal_state, message)

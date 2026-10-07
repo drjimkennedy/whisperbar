@@ -38,6 +38,27 @@ class AudioTests(unittest.TestCase):
                 capture.close()
             stream.close.assert_called_once()
 
+    def test_close_failure_retains_handle_for_retry(self):
+        from unittest.mock import MagicMock
+        stream = MagicMock()
+        stream.close.side_effect = [RuntimeError('native close failed'), None]
+        capture = Capture(None, 16000, 1)
+        capture.stream = stream
+        with self.assertRaisesRegex(RuntimeError, 'native close failed'):
+            capture.close()
+        self.assertIs(capture.stream, stream)
+        capture.close()
+        self.assertIsNone(capture.stream)
+        self.assertEqual(stream.close.call_count, 2)
+
+    def test_missing_selected_device_falls_back_to_default(self):
+        from adapters.audio import AudioDevices
+        devices = AudioDevices()
+        devices.selected = 'Disconnected AirPods'
+        with patch('adapters.audio.sd.query_devices', side_effect=[
+            [{'name': 'Built-in', 'max_input_channels': 1}], {'name': 'Built-in'}]):
+            self.assertEqual(devices.resolve(), (None, 'Built-in'))
+
 
 class DesktopTests(unittest.TestCase):
     def test_second_instance_rejected_and_release_allows_restart(self):

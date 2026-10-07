@@ -26,7 +26,7 @@ A blocking native call cannot be forcibly interrupted by Python threads. On quit
 - `capture_factory() → capture`: one capture instance per session.
 - `capture.start(ready_callback)`: open microphone, report readiness only after nonempty samples arrive.
 - `capture.last_sample_at`: monotonic timestamp for the sample watchdog.
-- `capture.close()`: idempotent cleanup; attempt stream close even if stream stop raises.
+- `capture.close()`: idempotent cleanup; attempt stream close even if stream stop raises. Retain the stream handle if native close fails so the final cleanup path can retry. If cleanup still fails, require an app restart and block new recordings/microphone refresh; cancellation must not hide that failure.
 - `capture.snapshot() → audio`: owned mono float32 samples at configured rate, finite, clipped to [-1, 1]. Reject absent/silent samples. No temporary WAV file is used in the dictation path.
 - `recognize(audio) → text`: local Whisper with English and `fp16=False`; error or empty text does not deliver.
 - `prepare_delivery(cancelled)`: cancellable waiting for shortcut release and focus-settling delay; no clipboard/paste mutation.
@@ -53,4 +53,4 @@ The clipboard is overwritten; the destination field is not validated; insertion 
 
 `tests/test_setup.py`: setup prerequisites and model-load failure. Native GUI startup and duplicate-process rejection were verified on Jim’s Mac. Jim confirmed ordinary dictation pasted and a subsequent Escape-cancelled recording produced no inserted text.
 
-Remaining validation: physical mic unplug/reconnect, native permission revocation, cancelling during a long real inference, other target apps, and measured cancellation latency. Automated scenarios do not substitute for that platform matrix.
+Additional evidence: `scripts/check_inference_cancellation.py` exercised actual cached Whisper CPU processing of synthetic audio, accepted cancellation while computation was active, rejected new work while draining, and discarded the eventual result. This measures the coordinator call, not native Escape-to-UI latency. Native AirPods disconnect was detected as stalled audio with no partial delivery; a subsequent system-default Mac microphone session worked without restarting, confirmed by Jim. Native Accessibility denial was verified by a real trust probe, a production-handler test with output spies, and a live transcription that did not paste automatically. Original permission was restored and verified. Jim confirmed manual Command-V recovered the text. Remaining validation: native microphone-permission revocation, longer speech inference, other target apps, and native cancellation latency. Automated scenarios do not substitute for that platform matrix.
