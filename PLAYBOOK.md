@@ -1,6 +1,6 @@
 # WhisperBar operations playbook
 
-Updated 2026-10-07 for the Stage 1 session coordinator. The upgrade [PRD](docs/PRD-robust-whisperbar.md) describes proposed work; the [development log](docs/DEVELOPMENT-LOG.md) records delivered changes and verification.
+Updated 2026-10-07 for the Stage 2 history and safe insertion. The upgrade [PRD](docs/PRD-robust-whisperbar.md) describes proposed work; the [development log](docs/DEVELOPMENT-LOG.md) records delivered changes and verification.
 
 ## Setup and launch
 
@@ -14,12 +14,12 @@ If upgrading from the earlier shared environment, the original local environment
 
 - Option+Space starts recording; press again to stop and transcribe. Repeated key-down events do not toggle again. A second press during microphone startup cancels that attempt. Presses during processing are ignored.
 - Menu bar: microphone icon is idle, red appears after actual audio samples arrive, hourglass is starting/processing/cancelling, warning is an error. Open the menu for the full status.
-- Microphone menu selects an input; Refresh device list re-enumerates devices. Selection does not yet persist across restarts.
-- Output overwrites the clipboard and attempts Command-V into the active field. Focus validation and history are planned, not implemented.
+- Microphone menu selects an input; Refresh device list re-enumerates devices. Selection persists across restarts.
+- Output verifies the original application, window, editable field, and selection, then requests direct Accessibility insertion. Unsupported or changed destinations require Copy Last; automatic output never touches the clipboard.
 - Escape or Cancel dictation cancels recording or suppresses pending output. Inference may finish internally before a new session can start. Cancellation cannot undo a paste once delivery has begun. Escape is not swallowed and may also affect the focused application.
-- Copy last transcript recovers the most recent completed output from memory, including a failed paste. It is lost when the app quits; no persistent history exists yet.
+- Copy last transcript recovers the most recent completed output from memory, including a failed paste. Keep last 20 also restores completed text after restart. No history retains Copy Last only until quit.
 - Recording automatically stops at 300 seconds. Silent, missing, invalid, or stalled audio reports an error. Microphone selection/refresh is blocked during active work.
-- Configuration changes in `config.py` require restart. A second launch exits with a message instead of creating another instance.
+- Menu shortcut changes apply while idle; model changes apply after restart. A second launch exits with a message instead of creating another instance.
 
 ## Permissions and troubleshooting
 
@@ -33,7 +33,7 @@ Grant the launching app/interpreter the applicable Microphone, Input Monitoring,
 | Model load/download fails | Check connection and disk space, inspect `whisperbar.log`, retry launcher; this is distinct from package setup |
 | No microphone audio | Check permissions, selected/default input and mute status; refresh device list |
 | Shortcut does nothing | Check input/accessibility permissions and shortcut conflicts |
-| Text does not paste | Use Copy last transcript and paste manually. Check Accessibility and focus; persistent history and destination validation remain planned |
+| Text does not paste | Use Copy last transcript and paste manually. Check Accessibility and keep the original field/selection focused; unsupported fields need manual copying |
 | Microphone cleanup failed — restart app | Quit and relaunch; new recording and microphone refresh are deliberately blocked while the native stream state is uncertain |
 | App appears stuck | Use Cancel dictation and wait for inference to drain; inspect `whisperbar.log` if it does not recover |
 
@@ -63,3 +63,11 @@ Manual smoke test: quit any running copy, launch, focus a non-sensitive Notes do
 The README includes a launchd example. This checkout does not prove that a login agent or shell alias is currently installed. Configure login startup only after a manual launch works. Its command should call this checkout’s `launch.sh`, which uses `.venv`.
 
 Dependency changes require updating both direct and full baseline pins, a fresh isolated install, `pip check`, imports, and the relevant manual smoke test. Preserve prior pin files in Git and record migrations in the development log. To roll back code, use a known Git revision and recreate its environment; do not assume a newer environment is compatible.
+
+## Stage 2 history and data recovery
+
+First-run choice: Keep last 20 or No history. Jim selected Keep last 20. Data is stored under `~/Library/Application Support/WhisperBar/` in versioned settings JSON and SQLite. Use Transcript history to copy/delete records or export/import JSON; newest 20 retention applies to imports too. Turning history off confirms deletion. Exports and backups are separate and are not deleted by this setting.
+
+If storage fails, Copy Last remains available in memory and the menu reports the failure. Preserve unknown/corrupt files before attempting recovery; startup rejects unsupported schemas instead of overwriting them. See the [data contract](docs/contracts/history-and-delivery.md). Before rolling back to Stage 1, export valuable history and quit the current process. Stage 1 cannot read history or persistent preferences and overwrites the clipboard during delivery.
+
+Verified on this Mac: first-run Keep last 20 choice, TextEdit Copy Last fallback, corrected automatic TextEdit insertion, and history visible after restart. Native changed-focus checks, save/open panels, and wider application coverage remain pending; automated checks cover target changes and JSON round-trips.

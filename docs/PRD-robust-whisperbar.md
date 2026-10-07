@@ -2,14 +2,14 @@
 
 **Slug:** whisperbar-robust-product-prd
 **Created:** 2026-10-07
-**Revised:** 2026-10-07 11:31 AEST
+**Revised:** 2026-10-07 12:10 AEST
 **Status:** Proposed
 
 ## NOW
 
 - [ ] Complete the remaining platform matrix, including native microphone permission denial; Accessibility denial and manual clipboard recovery now pass.
 - [ ] Verify output in additional target applications and native cancellation timing; cancellation during actual synthetic-audio inference now passes.
-- [ ] Close the remaining Stage 1 checks before implementing Stage 2 persistent history and safer delivery.
+- [ ] Finish native Stage 2 changed-focus and export/import-panel checks before advancing to Stage 3 feedback.
 
 ## Executive Summary
 
@@ -21,7 +21,7 @@ Handy is a useful reference: the inspected repository uses a Rust backend with T
 
 Build portability into the work now through versioned data formats, replaceable platform and inference adapters, language-neutral acceptance scenarios, decision records, and an evidence-backed development log. Stage 0 now has a tested isolated development installation and initial inference measurements. Customer packaging, newer-runtime compatibility, and clean-machine distribution remain later validation work.
 
-This document defines proposed requirements; completed Stage 0 work and remaining verification are tracked in the development log. Jim owns product priorities and the eventual commercial decision; implementation work must record what actually shipped and what was tested.
+This document defines the roadmap; Stage 0–2 implementation and remaining verification are tracked in the development log. Jim owns product priorities and the eventual commercial decision; implementation work must record what actually shipped and what was tested.
 
 ## 1. Product goal and audience
 
@@ -211,3 +211,5 @@ When revising, preserve the original creation date, update Revised/status, disti
 2026-10-07: Additional Stage 1 validation passed: actual cached-model inference cancellation, native AirPods removal detection, and subsequent Mac microphone dictation without restart. Fixed uncertain stream cleanup to retain/retry its handle and block new capture after persistent failure. Twenty-eight automated tests pass. Native permission revocation and broader application coverage remain open.
 
 2026-10-07: Native Accessibility-denial test passed: trust became false, transcription completed without automatic paste, and production output routing selected copy-only. Original permissions were restored and native trust returned true. Jim confirmed manual clipboard recovery; microphone permission revocation is a separate untested case.
+
+2026-10-07: At Jim’s request, implemented Stage 2 while carrying forward incomplete Stage 1 native checks explicitly. Added optional last-20 SQLite history, versioned JSON interchange/preferences, deletion, and direct target-validated insertion that leaves the clipboard untouched. Jim selected Keep last 20 and confirmed TextEdit automatic insertion plus history visible after restart; earlier Copy Last fallback also passed. Fixed first-run UI ordering and PyObjC tuple selection-range handling during native checks. Wider native validation remains open; see the data contract and ADR 0003.

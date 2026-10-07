@@ -74,21 +74,36 @@ class DesktopTests(unittest.TestCase):
                 first.close()
                 second.close()
 
-    def test_untrusted_output_copies_without_key_injection(self):
-        output = Output()
-        with patch('adapters.desktop.pyperclip.copy') as copy, \
-             patch('adapters.desktop.pyautogui.hotkey') as paste, \
+    def test_untrusted_output_preserves_clipboard_and_offers_copy(self):
+        from unittest.mock import MagicMock
+        focus = MagicMock()
+        output = Output(focus=focus)
+        with patch('pyperclip.copy') as copy, \
              patch('adapters.desktop.AXIsProcessTrusted', return_value=False):
-            self.assertIn('Accessibility', output.deliver('hello'))
-            copy.assert_called_once_with('hello')
-            paste.assert_not_called()
+            self.assertIn('Accessibility', output.deliver('hello').message)
+            copy.assert_not_called()
+            focus.insert.assert_not_called()
 
-    def test_trusted_output_reports_request_not_confirmation(self):
-        with patch('adapters.desktop.pyperclip.copy'), \
-             patch('adapters.desktop.pyautogui.hotkey') as paste, \
+    def test_trusted_output_inserts_only_through_captured_target(self):
+        from unittest.mock import MagicMock
+        focus = MagicMock()
+        focus.snapshot.return_value = 'target'
+        focus.insert.return_value = True
+        output = Output(focus=focus)
+        output.begin()
+        with patch('pyperclip.copy') as copy, \
              patch('adapters.desktop.AXIsProcessTrusted', return_value=True):
-            self.assertIn('Paste requested', Output().deliver('hello'))
-            paste.assert_called_once_with('command', 'v', _pause=False)
+            self.assertEqual(output.deliver('hello').status, 'insert_requested')
+            focus.insert.assert_called_once_with('target', 'hello')
+            copy.assert_not_called()
+
+    def test_changed_target_requires_manual_copy_without_clipboard_mutation(self):
+        from unittest.mock import MagicMock
+        focus = MagicMock()
+        focus.insert.return_value = False
+        with patch('pyperclip.copy') as copy, patch('adapters.desktop.AXIsProcessTrusted', return_value=True):
+            self.assertEqual(Output(focus=focus).deliver('hello').status, 'manual_copy_required')
+            copy.assert_not_called()
 
     def test_key_release_preparation_is_cancellable(self):
         cancel = threading.Event()

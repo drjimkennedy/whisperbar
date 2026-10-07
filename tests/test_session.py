@@ -231,6 +231,47 @@ class SessionTests(unittest.TestCase):
         self.finish(c)
         self.assertEqual(self.deliveries, ['hello'])
 
+    def test_persist_before_delivery_and_update_after(self):
+        order = []
+        def save(text, metadata):
+            order.append(('save', text))
+            self.assertIn('transcription_ms', metadata)
+            return 'id'
+        c = self.make(save_transcript=save,
+                      deliver=lambda text: order.append(('deliver', text)) or 'done',
+                      update_transcript=lambda identifier,status: order.append(('update',identifier)))
+        self.record(c)
+        c.toggle()
+        self.finish(c)
+        self.assertEqual(order, [('save','hello'), ('deliver','hello'), ('update','id')])
+
+    def test_storage_failure_preserves_memory_and_delivery(self):
+        def fail(*_):
+            raise OSError('disk full')
+        c = self.make(save_transcript=fail)
+        self.record(c)
+        c.toggle()
+        self.finish(c)
+        self.assertEqual(c.last_text, 'hello')
+        self.assertEqual(self.deliveries, ['hello'])
+        self.assertIn('History unavailable', self.events[-1].message)
+
+    def test_cancelled_result_is_never_persisted(self):
+        entered, finish = threading.Event(), threading.Event()
+        stored = []
+        def recognize(_):
+            entered.set()
+            finish.wait(2)
+            return 'cancel me'
+        c = self.make(recognize=recognize, save_transcript=lambda *args:stored.append(args))
+        self.record(c)
+        c.toggle()
+        self.assertTrue(entered.wait(2))
+        c.cancel()
+        finish.set()
+        self.finish(c)
+        self.assertEqual(stored, [])
+
 
 class ShortcutTests(unittest.TestCase):
     def test_auto_repeat_and_modifier_variations(self):

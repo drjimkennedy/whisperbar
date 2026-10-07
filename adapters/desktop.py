@@ -6,8 +6,6 @@ from pathlib import Path
 import tempfile
 import time
 
-import pyautogui
-import pyperclip
 from ApplicationServices import AXIsProcessTrusted
 
 
@@ -34,9 +32,15 @@ class InstanceLock:
 
 
 class Output:
-    def __init__(self, held=lambda: False):
+    def __init__(self, held=lambda: False, focus=None):
+        from adapters.focus import Focus
         self.held = held
+        self.focus = focus or Focus()
+        self.target = None
         self.manual_only = False
+
+    def begin(self):
+        self.target = self.focus.snapshot()
 
     def prepare(self, cancelled):
         deadline = time.monotonic() + 2.0
@@ -47,12 +51,12 @@ class Output:
         cancelled.wait(0.15)
 
     def deliver(self, text):
-        pyperclip.copy(text)
+        from core.session import DeliveryResult
         if self.manual_only:
-            return 'Copied — release shortcut keys, then paste manually'
+            return DeliveryResult('manual_copy_required', 'Text ready — release keys and use Copy last transcript')
         if not AXIsProcessTrusted():
-            return 'Copied — enable Accessibility or paste manually'
-        # Keep the irreversible commit short; do not use PyAutoGUI's global pause.
-        pyautogui.hotkey('command', 'v', _pause=False)
-        logging.getLogger('whisperbar').info('Paste requested; insertion is not confirmed')
-        return 'Paste requested — use Copy last transcript if needed'
+            return DeliveryResult('manual_copy_required', 'Text ready — enable Accessibility or use Copy last transcript')
+        if self.focus.insert(self.target, text):
+            logging.getLogger('whisperbar').info('Insertion requested in verified field; clipboard unchanged')
+            return DeliveryResult('insert_requested', 'Insertion requested — clipboard preserved')
+        return DeliveryResult('manual_copy_required', 'Target changed or unsupported — use Copy last transcript')

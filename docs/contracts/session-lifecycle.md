@@ -41,9 +41,7 @@ Capture is bounded to `MAX_RECORDING_SECONDS=300` at 16 kHz, one float32 channel
 
 Retain microphone re-enumeration and fallback to system input if a selected device disappears. Microphone picker/refresh actions serialize with lifecycle commands and do not reset PortAudio during active capture. Native removal/permission failures still need physical-device validation beyond the simulated tests.
 
-Output waits up to two seconds for shortcut keys to release, then a cancellable 150 ms settling delay. If keys remain held, copy only and instruct manual paste. If Accessibility is unavailable, also copy only. Otherwise send Command-V without PyAutoGUI’s extra global pause. This reduces one possible timing problem; it does not establish the cause of the earlier failed paste.
-
-The clipboard is overwritten; the destination field is not validated; insertion cannot be confirmed. Those are Stage 2 requirements. Copy Last holds one completed output in memory until quit. Cancelled recognition results do not replace it. Persistent history, export/import, clipboard restoration, and destination checking are not implemented here.
+Output waits up to two seconds for shortcut keys to release, then a cancellable 150 ms settling delay. Stage 2 captures the destination at session start, saves completed text before delivery when history is enabled, and returns a structured delivery status. Held keys, denied permission, or changed/unsupported destinations require explicit Copy Last. Automatic output never modifies the clipboard. See the [current history and delivery contract](history-and-delivery.md); it supersedes Stage 1's automatic copy-and-Command-V behaviour. Cancelled results do not replace retained text or enter history.
 
 ## Conformance evidence
 

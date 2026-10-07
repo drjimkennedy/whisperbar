@@ -2,6 +2,21 @@
 
 Record implemented changes separately from proposals. Keep entries newest first. Use repository-relative links and commit identifiers when available.
 
+## 2026-10-07 — Stage 2 recoverable output and preferences
+
+**Status:** Implemented; TextEdit insertion, Copy Last recovery, first-run choice, and history after restart verified by Jim. Extended native checks remain open.
+**Starting commit:** `ac96168`.
+
+Added independent storage modules with SQLite version 1, newest-20 retention, strict JSON export/import, atomic versioned preferences, and unknown-schema preservation. Menu controls cover copying/deleting records, deleting all, import/export, history opt-out, persistent microphone/shortcut, and next-launch model. Completed text is retained before delivery; cancellation excludes persistence, and storage failure preserves memory recovery. No raw audio is retained. User data lives outside the checkout under Application Support; export files contain transcript text.
+
+Added a macOS destination adapter and structured delivery outcomes. Capture process/window/field/selection at session start, revalidate before targeted AXSelectedText insertion, and retain text for explicit Copy Last when unsupported or changed. Automatic output leaves the clipboard untouched. This intentionally replaces Stage 1 automatic copy-and-Command-V, including automatic clipboard population when permission is denied. See [ADR 0003](decisions/0003-portable-history-and-targeted-insertion.md) and the [portable data contract](contracts/history-and-delivery.md).
+
+Native testing found the first-run privacy prompt was issued before the menu-bar event loop; moved it to the first UI timer tick before enabling shortcuts. Jim selected Keep last 20, and saved preferences confirmed that choice. The initial TextEdit session required Copy Last, which Jim confirmed recovered the text. Investigation found that PyObjC returns a plain tuple for AX selection ranges; corrected handling and added a regression test. Restarted the app with the fix. Jim then confirmed both automatic TextEdit insertion and the earlier transcript visible in history after restart. Transcript contents were not copied into this log.
+
+Validation: `.venv/bin/python -m unittest discover -s tests` covers 49 cases, including history restart/retention, import idempotence and rollback, schema protection, live-data export overwrite prevention, settings atomic failure, no-history wiring, save-before-delivery, cancellation exclusion, destination changes, and deferred onboarding. Final run results are recorded with this commit. No runtime dependency changes were needed.
+
+Limits: native changed-focus testing, native import/export panels, additional destination apps, microphone-permission denial, and measured native cancellation latency remain pending. Unit tests do not close those gates. Stage 2 proceeded at Jim's request with remaining Stage 1 checks carried forward. Rollback: export valuable text, quit the app, restore the prior code/environment; Stage 1 does not consume these settings/history files and overwrites the clipboard. Preserve files for forward recovery.
+
 ## 2026-10-07 — Stage 1 native-validation follow-up
 
 **Status:** Cleanup fix implemented and 28 automated tests passed; native AirPods disconnect and recovery to the Mac microphone passed. Native Accessibility denial was verified and original access restored; manual Command-V recovery also passed. Additional target-app checks remain pending.

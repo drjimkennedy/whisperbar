@@ -28,6 +28,12 @@ class Event:
     message: str
 
 
+@dataclass(frozen=True)
+class DeliveryResult:
+    status: str
+    message: str
+
+
 @dataclass
 class Session:
     id: int
@@ -39,12 +45,18 @@ class Session:
 
 class Coordinator:
     def __init__(self, capture_factory, recognize, prepare_delivery, deliver, emit,
-                 max_seconds=300, ready_timeout=5, stall_timeout=3):
+                 max_seconds=300, ready_timeout=5, stall_timeout=3,
+                 begin_session=lambda: None, save_transcript=lambda text, metadata: None,
+                 update_transcript=lambda identifier, status: None, sample_rate=16000):
         self.capture_factory = capture_factory
         self.recognize = recognize
         self.prepare_delivery = prepare_delivery
         self.deliver = deliver
         self.emit = emit  # Must enqueue only; never call a GUI directly.
+        self.begin_session = begin_session
+        self.save_transcript = save_transcript
+        self.update_transcript = update_transcript
+        self.sample_rate = sample_rate
         self.max_seconds = max_seconds
         self.ready_timeout = ready_timeout
         self.stall_timeout = stall_timeout
@@ -75,6 +87,13 @@ class Coordinator:
                 session = Session(self.sequence, threading.Event(), threading.Event())
                 self.session = session
                 self._set(State.ARMING, 'Starting microphone…')
+                try:
+                    self.begin_session()
+                except Exception:
+                    self.session = None
+                    self._set(State.ERROR, 'Unable to identify destination — retry')
+                    self.log.exception('Session initialization failed')
+                    return False
                 self.worker = threading.Thread(target=self._run, args=(session,), daemon=True,
                                                name=f'dictation-{session.id}')
                 try:
@@ -135,6 +154,8 @@ class Coordinator:
 
     def _run(self, session):
         capture = None
+        record_id = None
+        storage_warning = ''
         terminal_state, message = State.IDLE, 'Ready'
         try:
             capture = self.capture_factory()
@@ -157,7 +178,9 @@ class Coordinator:
             if session.cancelled.is_set():
                 return
             audio = capture.snapshot()
+            inference_start = time.monotonic()
             text = self.recognize(audio).strip()
+            inference_ms = round((time.monotonic() - inference_start) * 1000)
             if session.cancelled.is_set():
                 return
             if not text:
@@ -172,12 +195,33 @@ class Coordinator:
                     return
                 # Retain before the output attempt so a failed paste can be recovered.
                 self.last_text = text
-                # This short irreversible operation and cancel() have one defined order.
+                # Completion, retention and delivery have one order against cancellation.
                 session.delivery_committed = True
-                message = self.deliver(text)
+                try:
+                    samples = getattr(capture, 'samples', None)
+                    record_id = self.save_transcript(text, {
+                        'duration_ms': round(samples / self.sample_rate * 1000) if samples is not None else None,
+                        'transcription_ms': inference_ms,
+                    })
+                except Exception:
+                    self.log.exception('Transcript persistence failed; text retained in memory')
+                    storage_warning = 'History unavailable; Copy Last retained in memory. '
+                outcome = self.deliver(text)
+                message = getattr(outcome, 'message', outcome)
+                if record_id:
+                    try:
+                        self.update_transcript(record_id, getattr(outcome, 'status', 'insert_requested'))
+                    except Exception:
+                        self.log.exception('Unable to update transcript delivery status')
+                        storage_warning += 'History status update failed. '
         except Exception as exc:
             self.log.exception('Session %s failed', session.id)
             terminal_state, message = State.ERROR, str(exc)
+            if record_id:
+                try:
+                    self.update_transcript(record_id, 'failed')
+                except Exception:
+                    self.log.exception('Unable to record delivery failure')
         finally:
             if capture is not None:
                 try:
@@ -188,4 +232,4 @@ class Coordinator:
                         self.restart_required = True
                         self.failed_capture = capture
                     terminal_state, message = State.ERROR, 'Microphone cleanup failed — restart app'
-            self._finish(session, terminal_state, message)
+            self._finish(session, terminal_state, storage_warning + message)

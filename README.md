@@ -1,8 +1,8 @@
 # WhisperBar
 
-Free, private, offline Mac dictation that works in any app.
+Free, private, offline Mac dictation with recoverable transcripts.
 
-Press a hotkey from anywhere — browser, email, Slack, Notes — speak, press again. The transcript pastes back wherever your cursor was. No API key. No internet. Runs locally via [OpenAI Whisper](https://github.com/openai/whisper).
+Press a hotkey from anywhere — browser, email, Slack, Notes — speak, press again. The transcript inserts into supported, unchanged text fields; Copy Last recovers it elsewhere. No API key. No internet. Runs locally via [OpenAI Whisper](https://github.com/openai/whisper).
 
 **[Watch the build video →](https://youtu.be/hyL6X3hODlE)**  
 **[Full PRD and walkthrough →](https://drjimkennedy.com/resources/whisperbar)**
@@ -12,7 +12,7 @@ Press a hotkey from anywhere — browser, email, Slack, Notes — speak, press a
 ## How it works
 
 ```
-⌥Space → Mic → Buffer → Whisper (on-device) → Clipboard → ⌘V → Cursor
+⌥Space → Mic → Buffer → Whisper (on-device) → History → Verified text field
 ```
 
 A menu-bar icon (`🎙`) shows you what's happening. One hotkey starts and stops recording. That's the entire interface.
@@ -48,7 +48,7 @@ Go to **System Settings → Privacy & Security** and grant:
 
 - **Microphone** — audio capture
 - **Input Monitoring** — global hotkey from any app
-- **Accessibility** — simulated ⌘V paste
+- **Accessibility** — verify the destination and insert text
 
 > **First-run gotcha:** if you see *"This process is not trusted — input event monitoring will not be possible"*, add Terminal (or `python3`) to both Input Monitoring and Accessibility, quit, and relaunch.
 
@@ -60,7 +60,7 @@ Go to **System Settings → Privacy & Security** and grant:
 ./launch.sh
 ```
 
-The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, press again to transcribe and request a paste. Press **Escape** or choose **Cancel dictation** to cancel before delivery begins. If insertion fails, use **Copy last transcript** from the menu. The transcript is kept only in memory until quit.
+The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, press again to transcribe and request a paste. Press **Escape** or choose **Cancel dictation** to cancel before delivery begins. If insertion fails, use **Copy last transcript** from the menu. On first run, choose **Keep last 20** or **No history**. Keeping history restores transcripts after restart; No history keeps Copy Last only until quit. Automatic insertion leaves your clipboard untouched; explicit Copy Last replaces it.
 
 Recording starts visibly when audio samples arrive and stops automatically after five minutes. Repeated key events and processing-time presses cannot create overlapping sessions. A second launch exits without opening a duplicate app. See the [session contracts](docs/contracts/session-lifecycle.md) for behaviour and test coverage.
 
@@ -68,7 +68,7 @@ Recording starts visibly when audio samples arrive and stops automatically after
 
 ## Configuration
 
-Edit `config.py` — three settings, nothing else needs touching:
+Choose microphone, shortcut, and next-launch model in the menu; these preferences persist. `config.py` supplies defaults and capture settings:
 
 ```python
 SHORTCUT_KEY = "option+space"   # change if it conflicts
@@ -79,6 +79,10 @@ SAMPLE_RATE = 16000             # what Whisper expects — leave this alone
 `WHISPER_MODEL` controls the speed/accuracy tradeoff. The current configuration is `small`; compare models on your own recordings before changing it.
 
 ---
+
+## Transcript history
+
+The history menu offers Copy, Delete, Delete All, and portable JSON export/import. Disabling history asks to delete stored records. Local settings and SQLite text history live in `~/Library/Application Support/WhisperBar/`; raw recordings are not retained. Exports contain transcript text and remain wherever you save them. See the [history and delivery contract](docs/contracts/history-and-delivery.md) for formats, privacy, and compatibility limits.
 
 ## Auto-start at login
 
@@ -135,7 +139,6 @@ These were deliberately left out — each slots in without changing the signal c
 
 - **Push-to-talk mode** — a config flag branching in `toggle()`
 - **Multi-language** — remove the hard-pinned `language="en"` in `config.py`
-- **Model picker in the menu** — the menu already shows the model; making it selectable is UI-only
 - **Floating waveform window** — an optional second UI surface; the signal chain is untouched
 
 ---
