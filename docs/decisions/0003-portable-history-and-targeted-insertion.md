@@ -17,6 +17,6 @@ SQLite provides transactional retention/import and stable IDs without a new depe
 
 ## Validation and rollback
 
-Automated checks cover retention, recovery, imports, schema rejection, privacy wiring, failures, cancellation, and destination identity changes. Jim confirmed TextEdit insertion and saved history after restart, plus earlier Copy Last recovery. First-run native testing found and fixed prompt ordering; selection-range testing found and fixed PyObjC's tuple representation. Native changed-focus, other applications, and save/open panels remain pending.
+Automated checks cover retention, recovery, imports, schema rejection, privacy wiring, failures, cancellation, and destination identity changes. Jim confirmed TextEdit insertion and saved history after restart, plus earlier Copy Last recovery. First-run native testing found and fixed prompt ordering; selection-range testing found and fixed PyObjC's tuple representation. Jim subsequently confirmed native changed-focus protection and recovery, export through the save panel, and import through the open panel without duplicates. Wider application coverage remains pending.
 
 Export valuable history before rollback and quit the process. Stage 1 ignores these files and preferences and restores its previous clipboard-overwriting delivery. Preserve files for forward recovery; do not rewrite unknown schemas. A later Swift/Rust implementation should retain these formats and acceptance scenarios while replacing platform adapters.

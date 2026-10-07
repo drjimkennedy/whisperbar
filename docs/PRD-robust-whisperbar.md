@@ -2,14 +2,14 @@
 
 **Slug:** whisperbar-robust-product-prd
 **Created:** 2026-10-07
-**Revised:** 2026-10-07 12:10 AEST
+**Revised:** 2026-10-07 12:24 AEST
 **Status:** Proposed
 
 ## NOW
 
 - [ ] Complete the remaining platform matrix, including native microphone permission denial; Accessibility denial and manual clipboard recovery now pass.
 - [ ] Verify output in additional target applications and native cancellation timing; cancellation during actual synthetic-audio inference now passes.
-- [ ] Finish native Stage 2 changed-focus and export/import-panel checks before advancing to Stage 3 feedback.
+- [ ] Begin Stage 3 startup and recording feedback; Stage 2 native acceptance is complete on the current Mac.
 
 ## Executive Summary
 
@@ -213,3 +213,5 @@ When revising, preserve the original creation date, update Revised/status, disti
 2026-10-07: Native Accessibility-denial test passed: trust became false, transcription completed without automatic paste, and production output routing selected copy-only. Original permissions were restored and native trust returned true. Jim confirmed manual clipboard recovery; microphone permission revocation is a separate untested case.
 
 2026-10-07: At Jim’s request, implemented Stage 2 while carrying forward incomplete Stage 1 native checks explicitly. Added optional last-20 SQLite history, versioned JSON interchange/preferences, deletion, and direct target-validated insertion that leaves the clipboard untouched. Jim selected Keep last 20 and confirmed TextEdit automatic insertion plus history visible after restart; earlier Copy Last fallback also passed. Fixed first-run UI ordering and PyObjC tuple selection-range handling during native checks. Wider native validation remains open; see the data contract and ADR 0003.
+
+2026-10-07 12:24 AEST: Stage 2 accepted on the current Mac. Jim confirmed switching away from TextEdit prevented automatic insertion, Copy Last recovered the sentence, the export dialog saved a JSON file, and importing that file produced no duplicate records. Stage 3 can begin; wider compatibility and the carried-forward Stage 1 checks remain explicit release work.

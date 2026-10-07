@@ -2,6 +2,13 @@
 
 Record implemented changes separately from proposals. Keep entries newest first. Use repository-relative links and commit identifiers when available.
 
+## 2026-10-07 — Stage 2 native acceptance follow-up
+
+**Status:** Stage 2 accepted on the current Mac. Changed-focus protection, manual recovery, native export, and native import without duplicates passed.
+**Implementation commit:** `2482c0d`.
+
+Jim started dictation in TextEdit, switched applications, and stopped with the other application active. He confirmed that no text appeared automatically. He then confirmed Copy Last recovered the sentence in TextEdit and the native Export history dialog saved `WhisperBar-history-test.json` in Downloads. Jim then confirmed importing that same file through the native open dialog succeeded without duplicate entries. This completes the agreed Stage 2 native sign-off, alongside earlier TextEdit insertion and restart recovery and 49 passing automated tests. Broader app/OS coverage and outstanding Stage 1 microphone-permission and native cancellation-timing checks remain release work; this is not universal compatibility certification. No transcript text is included here. The exported file is a separate user-controlled copy and is not removed by history deletion.
+
 ## 2026-10-07 — Stage 2 recoverable output and preferences
 
 **Status:** Implemented; TextEdit insertion, Copy Last recovery, first-run choice, and history after restart verified by Jim. Extended native checks remain open.
