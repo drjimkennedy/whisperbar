@@ -63,7 +63,10 @@ class StartupTests(unittest.TestCase):
         output = io.StringIO()
         with patch.dict(sys.modules, modules), patch('logging.FileHandler'), \
              patch('logging.basicConfig'), patch('logging.getLogger'), \
+             patch('logging.handlers.RotatingFileHandler'), \
+             patch('adapters.desktop.InstanceLock') as lock, \
              contextlib.redirect_stderr(output), self.assertRaises(SystemExit) as raised:
+            lock.return_value.acquire.return_value = True
             runpy.run_path(str(ROOT / 'app.py'), run_name='__main__')
         self.assertEqual(raised.exception.code, 1)
         self.assertIn('could not load model', output.getvalue())

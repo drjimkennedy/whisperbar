@@ -1,6 +1,6 @@
 # WhisperBar operations playbook
 
-Updated 2026-10-07 for the Stage 0 Python baseline. The upgrade [PRD](docs/PRD-robust-whisperbar.md) describes proposed work; the [development log](docs/DEVELOPMENT-LOG.md) records delivered changes and verification.
+Updated 2026-10-07 for the Stage 1 session coordinator. The upgrade [PRD](docs/PRD-robust-whisperbar.md) describes proposed work; the [development log](docs/DEVELOPMENT-LOG.md) records delivered changes and verification.
 
 ## Setup and launch
 
@@ -12,11 +12,14 @@ If upgrading from the earlier shared environment, the original local environment
 
 ## Everyday operation
 
-- Option+Space starts recording; press again to stop and transcribe.
-- Menu bar: microphone icon is idle, red is recording, hourglass is processing, warning is an error.
+- Option+Space starts recording; press again to stop and transcribe. Repeated key-down events do not toggle again. A second press during microphone startup cancels that attempt. Presses during processing are ignored.
+- Menu bar: microphone icon is idle, red appears after actual audio samples arrive, hourglass is starting/processing/cancelling, warning is an error. Open the menu for the full status.
 - Microphone menu selects an input; Refresh device list re-enumerates devices. Selection does not yet persist across restarts.
 - Output overwrites the clipboard and attempts Command-V into the active field. Focus validation and history are planned, not implemented.
-- Configuration changes in `config.py` require restart. No cancellation or single-instance protection exists yet; quit an existing copy before launching another.
+- Escape or Cancel dictation cancels recording or suppresses pending output. Inference may finish internally before a new session can start. Cancellation cannot undo a paste once delivery has begun. Escape is not swallowed and may also affect the focused application.
+- Copy last transcript recovers the most recent completed output from memory, including a failed paste. It is lost when the app quits; no persistent history exists yet.
+- Recording automatically stops at 300 seconds. Silent, missing, invalid, or stalled audio reports an error. Microphone selection/refresh is blocked during active work.
+- Configuration changes in `config.py` require restart. A second launch exits with a message instead of creating another instance.
 
 ## Permissions and troubleshooting
 
@@ -30,10 +33,10 @@ Grant the launching app/interpreter the applicable Microphone, Input Monitoring,
 | Model load/download fails | Check connection and disk space, inspect `whisperbar.log`, retry launcher; this is distinct from package setup |
 | No microphone audio | Check permissions, selected/default input and mute status; refresh device list |
 | Shortcut does nothing | Check input/accessibility permissions and shortcut conflicts |
-| Text does not paste | Check Accessibility and focus; current app has no persistent transcript recovery |
-| App appears stuck | Inspect `whisperbar.log`, quit/restart; session coordination fixes are Stage 1 |
+| Text does not paste | Use Copy last transcript and paste manually. Check Accessibility and focus; persistent history and destination validation remain planned |
+| App appears stuck | Use Cancel dictation and wait for inference to drain; inspect `whisperbar.log` if it does not recover |
 
-The current runtime logs are in `whisperbar.log` beside `app.py`. Log rotation is not yet implemented. Do not distribute logs without reviewing them.
+The current runtime logs are in `whisperbar.log` beside `app.py`. Logs rotate at approximately 1 MB with three backups; transcript text and raw audio are not logged by this app. Do not distribute logs without reviewing them.
 
 ## Verification and baseline measurement
 
@@ -52,7 +55,7 @@ The benchmark defaults to ten seconds of synthetic silence and reads the cached 
 
 The JSON includes decoded-audio and model checksums, inference times, environment versions, and output character counts; it excludes transcript text and full audio paths. First inference is separate from warm runs. Model-load timing is not a cold disk-cache measurement. Record hardware identity alongside results. Do not claim p95 from these small runs.
 
-Manual smoke test: quit any running copy, launch, focus a non-sensitive Notes document, dictate one sentence, stop, verify one correct paste and return to idle. Record microphone, permissions, hardware/OS, and outcome. This is required to close Stage 0.
+Manual smoke test: quit any running copy, launch, focus a non-sensitive Notes document, dictate one sentence, stop, verify one correct paste and return to idle. Record microphone, permissions, hardware/OS, and outcome. Stage 0 passed on retry. For Stage 1, also cancel a second recording with Escape and verify it produces no text. The initial Stage 0 failed paste is not considered conclusively fixed.
 
 ## Login startup and recovery
 

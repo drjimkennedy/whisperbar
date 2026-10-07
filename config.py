@@ -12,3 +12,6 @@ WHISPER_MODEL = "small"
 
 # Audio sample rate — 16000 is what Whisper expects natively
 SAMPLE_RATE = 16000
+
+# Bound capture memory and automatically finish accidental long recordings.
+MAX_RECORDING_SECONDS = 300

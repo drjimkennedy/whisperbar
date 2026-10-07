@@ -60,7 +60,9 @@ Go to **System Settings → Privacy & Security** and grant:
 ./launch.sh
 ```
 
-The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, press again to transcribe and paste.
+The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, press again to transcribe and request a paste. Press **Escape** or choose **Cancel dictation** to cancel before delivery begins. If insertion fails, use **Copy last transcript** from the menu. The transcript is kept only in memory until quit.
+
+Recording starts visibly when audio samples arrive and stops automatically after five minutes. Repeated key events and processing-time presses cannot create overlapping sessions. A second launch exits without opening a duplicate app. See the [session contracts](docs/contracts/session-lifecycle.md) for behaviour and test coverage.
 
 ---
 

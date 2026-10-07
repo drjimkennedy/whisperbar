@@ -1,329 +1,187 @@
-"""
-WhisperBar — system-wide dictation via menu bar.
-
-Shortcut: Option+Space (configurable via SHORTCUT in config.py)
-- Press once to start recording (icon turns red)
-- Press again to stop, transcribe, and paste
-"""
-
-import threading
-import tempfile
+"""WhisperBar desktop shell: UI on the main thread, adapters behind a coordinator."""
 import logging
-import os
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from queue import Empty, Queue
 import sys
-import time
-import numpy as np
-import sounddevice as sd
-import scipy.io.wavfile as wav
-import whisper
+
 import pyperclip
-import pyautogui
 import rumps
+import whisper
 from pynput import keyboard
 
-from config import SHORTCUT_KEY, SAMPLE_RATE, WHISPER_MODEL
+from adapters.audio import AudioDevices, Capture, Recognizer
+from adapters.desktop import InstanceLock, Output
+from core.session import Coordinator, State
+from core.shortcut import Chord
+from config import SHORTCUT_KEY, SAMPLE_RATE, WHISPER_MODEL, MAX_RECORDING_SECONDS
 
-# ── Logging ────────────────────────────────────────────────────────────────────
-# Every recording logs device, sample count, and peak level to whisperbar.log —
-# when dictation fails, the log says whether the mic was silent, missing, or
-# the transcript was empty, without needing to reproduce the problem.
-
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisperbar.log")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(threadName)s %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_PATH),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-log = logging.getLogger("whisperbar")
-
-# ── State ─────────────────────────────────────────────────────────────────────
-
-recording = False
-audio_frames = []
-stream = None
-model = None
-selected_mic = None  # None = follow system default; else a device name string
-
-# ── Audio ──────────────────────────────────────────────────────────────────────
-
-def audio_callback(indata, frames, time_info, status):
-    if recording:
-        audio_frames.append(indata.copy())
+log = logging.getLogger('whisperbar')
 
 
-def reset_portaudio():
-    """Force PortAudio to re-enumerate audio devices.
-
-    macOS gotcha: PortAudio caches the device list when it first initializes.
-    If the default input changes after startup (AirPods/Continuity mic connect,
-    another app grabs the mic), the stale handle either records pure silence
-    (peak=0.0) or fails to open with PaErrorCode -9986. Terminating and
-    re-initializing right before each recording picks up the current device.
-    """
-    sd._terminate()
-    sd._initialize()
+def configure_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(threadName)s %(message)s',
+        handlers=[RotatingFileHandler(Path(__file__).with_name('whisperbar.log'),
+                                      maxBytes=1_000_000, backupCount=3),
+                  logging.StreamHandler(sys.stdout)],
+    )
 
 
-def list_input_devices():
-    """Names of all devices that can record, in PortAudio order (deduped)."""
-    names = []
-    for dev in sd.query_devices():
-        if dev["max_input_channels"] > 0 and dev["name"] not in names:
-            names.append(dev["name"])
-    return names
+def parse_shortcut(shortcut):
+    aliases = {'option': 'alt', 'command': 'cmd', 'control': 'ctrl', 'return': 'enter'}
+    special = {'alt', 'cmd', 'ctrl', 'shift', 'space', 'tab', 'enter'}
+    parts = [aliases.get(x.strip().lower(), x.strip().lower()) for x in shortcut.split('+')]
+    if len(parts) < 2 or not set(parts) & {'alt', 'cmd', 'ctrl', 'shift'}:
+        raise ValueError('Shortcut must include a modifier and a key')
+    if any(not p or (p not in special and len(p) != 1) for p in parts):
+        raise ValueError('Unsupported shortcut key')
+    return keyboard.HotKey.parse('+'.join(f'<{p}>' if p in special else p for p in parts))
 
-
-def resolve_input_device():
-    """Return (device_index_or_None, device_name) honoring the mic picker.
-
-    None index = PortAudio default (follows the macOS system input). If the
-    picked mic isn't currently connected (AirPods in the case, iPhone out of
-    range), fall back to the system default rather than failing.
-    """
-    if selected_mic:
-        for idx, dev in enumerate(sd.query_devices()):
-            if dev["name"] == selected_mic and dev["max_input_channels"] > 0:
-                return idx, dev["name"]
-        log.warning("Picked mic '%s' not connected — using system default", selected_mic)
-    return None, sd.query_devices(kind="input")["name"]
-
-
-def start_recording(app_ref):
-    global recording, audio_frames, stream
-    audio_frames = []
-    try:
-        reset_portaudio()
-        device_index, device_name = resolve_input_device()
-        stream = sd.InputStream(
-            samplerate=SAMPLE_RATE, channels=1, callback=audio_callback, device=device_index
-        )
-        stream.start()
-        recording = True
-        app_ref.set_recording(device_name)
-        log.info("Recording started (device=%s)", device_name)
-    except Exception:
-        recording = False
-        stream = None
-        log.exception("Unable to start recording")
-        app_ref.set_error("mic unavailable — try again")
-
-
-def stop_and_transcribe(app_ref):
-    global recording, stream
-    recording = False
-    if stream:
-        try:
-            stream.stop()
-            stream.close()
-        except Exception:
-            log.exception("Error closing stream")
-        stream = None
-
-    if not audio_frames:
-        log.warning("Recording stopped with no audio frames")
-        app_ref.set_idle()
-        return
-
-    app_ref.title = "⏳"
-
-    audio_data = np.concatenate(audio_frames, axis=0)
-    peak = float(np.abs(audio_data).max())
-    log.info("Recording stopped (samples=%d, peak=%.5f)", len(audio_data), peak)
-
-    # Silence guard: if the mic delivered only zeros (stale device), tell the
-    # user instead of silently pasting nothing.
-    if peak < 0.001:
-        log.warning("Recording was silent — input device likely stale or muted")
-        app_ref.set_error("no audio captured — check mic")
-        return
-
-    # Clip before int16 conversion — peaks above 1.0 (seen on AirPods) would
-    # otherwise wrap around and inject loud negative spikes into the WAV
-    audio_data = (np.clip(audio_data, -1.0, 1.0) * 32767).astype(np.int16)
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        tmp_path = f.name
-    wav.write(tmp_path, SAMPLE_RATE, audio_data)
-
-    try:
-        t0 = time.time()
-        result = model.transcribe(tmp_path, language="en", fp16=False)
-        text = result["text"].strip()
-        if text:
-            log.info("Transcribed %d chars in %.1fs — pasting", len(text), time.time() - t0)
-            pyperclip.copy(text)
-            time.sleep(0.15)  # brief pause so focus returns to original app
-            pyautogui.hotkey("command", "v")
-            app_ref.set_idle()
-        else:
-            log.warning("Transcription completed with no detected speech")
-            app_ref.set_error("no speech detected")
-    except Exception:
-        log.exception("Transcription failed")
-        app_ref.set_error("transcription failed")
-    finally:
-        os.unlink(tmp_path)
-
-
-# ── Menu bar app ───────────────────────────────────────────────────────────────
 
 class WhisperBar(rumps.App):
-    def __init__(self):
-        super().__init__("🎙", quit_button="Quit WhisperBar")
-        self._mic_menu = rumps.MenuItem("Microphone")
-        self.menu = [
-            rumps.MenuItem("Status: idle"),
-            None,  # separator
-            self._mic_menu,
-            rumps.MenuItem(f"Shortcut: {SHORTCUT_KEY}"),
-            rumps.MenuItem(f"Model: {WHISPER_MODEL}"),
-        ]
-        self._status_item = self.menu["Status: idle"]
-        self.rebuild_mic_menu()
+    def __init__(self, model):
+        super().__init__('🎙', quit_button=None)
+        self.events = Queue()
+        self.devices = AudioDevices()
+        self.output = Output()
+        self.controller = Coordinator(
+            lambda: Capture(self.devices, SAMPLE_RATE, MAX_RECORDING_SECONDS),
+            Recognizer(model), self.output.prepare, self.output.deliver, self.events.put,
+            max_seconds=MAX_RECORDING_SECONDS,
+        )
+        self.status_item = rumps.MenuItem('Status: ready')
+        self.mic_menu = rumps.MenuItem('Microphone')
+        self.cancel_item = rumps.MenuItem('Cancel dictation (Esc)', callback=self.cancel)
+        self.copy_item = rumps.MenuItem('Copy last transcript', callback=self.copy_last)
+        self.menu = [self.status_item, self.cancel_item, self.copy_item, None, self.mic_menu,
+                     rumps.MenuItem(f'Shortcut: {SHORTCUT_KEY}'),
+                     rumps.MenuItem(f'Model: {WHISPER_MODEL}'), None,
+                     rumps.MenuItem('Quit WhisperBar', callback=self.quit_app)]
+        self.chord = Chord(parse_shortcut(SHORTCUT_KEY), self.controller.toggle)
+        self.output.held = self.chord.held
+        self.listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
+        self.timer = rumps.Timer(self.process_events, 0.05)
+        self.rebuild_mics()
 
-    def rebuild_mic_menu(self):
-        """Populate the Microphone submenu with currently available inputs.
-
-        AirPods / iPhone Continuity mics only appear here while connected —
-        the Refresh item re-scans after connecting them.
-        """
-        for key in list(self._mic_menu.keys()):
-            del self._mic_menu[key]
-
-        default_item = rumps.MenuItem("System default", callback=self.pick_mic)
-        default_item.state = selected_mic is None
-        self._mic_menu.add(default_item)
-
+    def on_press(self, key):
         try:
-            reset_portaudio()
-            for name in list_input_devices():
-                item = rumps.MenuItem(name, callback=self.pick_mic)
-                item.state = name == selected_mic
-                self._mic_menu.add(item)
+            if key == keyboard.Key.esc:
+                self.controller.cancel()
+            else:
+                self.chord.press(self.listener.canonical(key))
         except Exception:
-            log.exception("Could not list input devices")
+            log.exception('Shortcut handler failed')
 
-        self._mic_menu.add(rumps.MenuItem("Refresh device list", callback=self.refresh_mics))
+    def on_release(self, key):
+        self.chord.release(self.listener.canonical(key))
+
+    def process_events(self, _timer):
+        # All Cocoa mutations happen here or in menu callbacks on the main thread.
+        latest = None
+        while True:
+            try:
+                latest = self.events.get_nowait()
+            except Empty:
+                break
+        if latest is not None and latest.session_id == self.controller.sequence:
+            icons = {State.IDLE: '🎙', State.ARMING: '⏳', State.RECORDING: '🔴',
+                     State.TRANSCRIBING: '⏳', State.DELIVERING: '⏳',
+                     State.CANCELLING: '⏳', State.ERROR: '⚠️', State.CLOSED: '🎙'}
+            self.title = icons[latest.state]
+            self.status_item.title = f'Status: {latest.message}'
+
+    def rebuild_mics(self):
+        # Serialize the check and refresh against shortcut commands. Never reset
+        # PortAudio while a capture is arming, recording, or being cleaned up.
+        with self.controller.lock:
+            if self.controller.state not in (State.IDLE, State.ERROR):
+                self.status_item.title = 'Status: finish or cancel before changing microphones'
+                return
+            for key in list(self.mic_menu.keys()):
+                del self.mic_menu[key]
+            default = rumps.MenuItem('System default', callback=self.pick_mic)
+            default.state = self.devices.selected is None
+            self.mic_menu.add(default)
+            try:
+                for name in self.devices.refresh():
+                    item = rumps.MenuItem(name, callback=self.pick_mic)
+                    item.state = name == self.devices.selected
+                    self.mic_menu.add(item)
+            except Exception:
+                log.exception('Microphone enumeration failed')
+                self.status_item.title = 'Status: microphone unavailable — check permissions'
+            self.mic_menu.add(rumps.MenuItem('Refresh device list', callback=lambda _: self.rebuild_mics()))
 
     def pick_mic(self, sender):
-        global selected_mic
-        selected_mic = None if sender.title == "System default" else sender.title
-        for item in self._mic_menu.values():
-            if item.title != "Refresh device list":
-                item.state = item.title == sender.title
-        log.info("Microphone picked: %s", sender.title)
+        with self.controller.lock:
+            if self.controller.state not in (State.IDLE, State.ERROR):
+                self.status_item.title = 'Status: finish or cancel before changing microphones'
+                return
+            self.devices.selected = None if sender.title == 'System default' else sender.title
+            self.rebuild_mics()
 
-    def refresh_mics(self, _sender):
-        self.rebuild_mic_menu()
-        log.info("Device list refreshed: %s", ", ".join(list_input_devices()))
+    def cancel(self, _sender):
+        self.controller.cancel()
 
-    def set_idle(self):
-        self.title = "🎙"
-        self._status_item.title = "Status: idle"
-
-    def set_recording(self, device_name=None):
-        self.title = "🔴"
-        suffix = f" ({device_name})" if device_name else ""
-        self._status_item.title = f"Status: recording…{suffix}"
-
-    def set_error(self, message):
-        """Show an error in the menu bar briefly, then return to idle."""
-        self.title = "⚠️"
-        self._status_item.title = f"Status: {message}"
-        threading.Timer(3.0, self.set_idle).start()
-
-    def toggle(self):
-        global recording
-        if not recording:
-            # start_recording sets the icon itself — only after the stream
-            # actually opens, so a failed mic never shows a false red icon
-            threading.Thread(target=start_recording, args=(self,), daemon=True).start()
-        else:
-            threading.Thread(target=stop_and_transcribe, args=(self,), daemon=True).start()
-
-
-# ── Hotkey listener ────────────────────────────────────────────────────────────
-
-def parse_shortcut(shortcut_str):
-    """Parse 'option+space' into pynput Key combination."""
-    parts = [p.strip().lower() for p in shortcut_str.split("+")]
-    modifiers = set()
-    key = None
-    modifier_map = {
-        "option": keyboard.Key.alt,
-        "alt": keyboard.Key.alt,
-        "cmd": keyboard.Key.cmd,
-        "command": keyboard.Key.cmd,
-        "ctrl": keyboard.Key.ctrl,
-        "control": keyboard.Key.ctrl,
-        "shift": keyboard.Key.shift,
-    }
-    key_map = {
-        "space": keyboard.Key.space,
-        "tab": keyboard.Key.tab,
-        "return": keyboard.Key.enter,
-        "enter": keyboard.Key.enter,
-    }
-    for part in parts:
-        if part in modifier_map:
-            modifiers.add(modifier_map[part])
-        elif part in key_map:
-            key = key_map[part]
-        else:
-            key = keyboard.KeyCode.from_char(part)
-    return modifiers, key
-
-
-def start_hotkey_listener(app_ref):
-    required_modifiers, trigger_key = parse_shortcut(SHORTCUT_KEY)
-    pressed = set()
-
-    def on_press(k):
+    def copy_last(self, _sender):
+        with self.controller.lock:
+            if self.controller.state not in (State.IDLE, State.ERROR):
+                self.status_item.title = 'Status: finish or cancel before copying'
+                return
+            text = self.controller.last_text
+        if not text:
+            self.status_item.title = 'Status: no completed transcript in this session'
+            return
         try:
-            pressed.add(k)
-            if trigger_key in pressed and required_modifiers.issubset(pressed):
-                app_ref.toggle()
+            pyperclip.copy(text)
+            self.status_item.title = 'Status: last transcript copied — paste manually'
         except Exception:
-            # never let an error kill the listener — the hotkey must survive
-            log.exception("Hotkey handler error")
+            log.exception('Copy last transcript failed')
+            self.status_item.title = 'Status: clipboard unavailable — retry Copy last transcript'
 
-    def on_release(k):
-        pressed.discard(k)
+    def quit_app(self, _sender):
+        self.shutdown()
+        rumps.quit_application()
 
-    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        listener.join()
+    def shutdown(self):
+        self.listener.stop()
+        self.timer.stop()
+        self.controller.close()
+
+    def start(self):
+        self.listener.start()
+        self.timer.start()
+        try:
+            self.run()
+        finally:
+            self.shutdown()
 
 
-# ── Entry point ────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    log.info("Starting WhisperBar with %s", sys.executable)
+def main():
+    configure_logging()
+    instance = InstanceLock()
+    if not instance.acquire():
+        print('WhisperBar is already running. Use its menu bar icon.', file=sys.stderr)
+        return 2
     try:
-        device_name = sd.query_devices(kind="input")["name"]
-        log.info("Using input device: %s", device_name)
-    except Exception:
-        log.exception("No input device found at startup")
-    log.info("Loading Whisper model '%s'…", WHISPER_MODEL)
-    try:
-        model = whisper.load_model(WHISPER_MODEL)
-    except Exception:
-        log.exception("Unable to load Whisper model '%s'", WHISPER_MODEL)
-        print(
-            f"WhisperBar could not load model '{WHISPER_MODEL}'. "
-            "First use requires an internet connection and free disk space. "
-            "Check the connection, available storage, and whisperbar.log, then retry ./launch.sh.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    log.info("Model loaded. WhisperBar ready")
+        log.info('Starting WhisperBar with %s', sys.executable)
+        try:
+            model = whisper.load_model(WHISPER_MODEL)
+        except Exception:
+            log.exception('Unable to load model')
+            print(f"WhisperBar could not load model '{WHISPER_MODEL}'. First use requires "
+                  'internet and free disk space. Check whisperbar.log, then retry ./launch.sh.',
+                  file=sys.stderr)
+            return 1
+        app = WhisperBar(model)
+        log.info('Model loaded. WhisperBar ready')
+        app.start()
+        return 0
+    finally:
+        instance.close()
 
-    app = WhisperBar()
 
-    hotkey_thread = threading.Thread(target=start_hotkey_listener, args=(app,), daemon=True)
-    hotkey_thread.start()
-
-    app.run()
+if __name__ == '__main__':
+    sys.exit(main())

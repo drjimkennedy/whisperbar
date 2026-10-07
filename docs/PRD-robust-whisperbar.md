@@ -2,14 +2,14 @@
 
 **Slug:** whisperbar-robust-product-prd
 **Created:** 2026-10-07
-**Revised:** 2026-10-07 11:19 AEST
+**Revised:** 2026-10-07 11:31 AEST
 **Status:** Proposed
 
 ## NOW
 
-- [ ] Investigate the initial paste failure; the Stage 0 smoke test passed on retry, with evidence in the development log.
-- [ ] Implement the Stage 1 recording coordinator, cancellation, and repeat-safe shortcuts.
-- [ ] Run the Stage 1 failure scenarios and record evidence before adding further features.
+- [ ] Verify native microphone removal and permission failure handling against the implemented Stage 1 coordinator.
+- [ ] Verify cancellation during long real inference and output behaviour in additional target applications.
+- [ ] Close the remaining Stage 1 checks before implementing Stage 2 persistent history and safer delivery.
 
 ## Executive Summary
 
@@ -205,3 +205,5 @@ Open decisions: supported OS/hardware; initial distribution route; confirmed lat
 When revising, preserve the original creation date, update Revised/status, distinguish evidence from proposals, recompute the NOW items, and append a dated note for changed scope or decisions. Preserve superseded targets and their rationale in decision records rather than silently rewriting history.
 
 2026-10-07 11:19 AEST: Stage 0 isolated setup, preflight, dependency pins, failure checks, and baseline measurement implemented. Manual paste succeeded on retry after an initial failure; retain that failure as an unresolved reliability issue. Historical environment-repair notes above describe the earlier state, now superseded by the isolated installation.
+
+2026-10-07: Stage 1 coordinator, adapters, cancellation, repeat protection, instance locking, limits, and paste feedback implemented. Twenty-four tests plus native startup, duplicate launch, and user-confirmed dictation/Escape cancellation passed. Extended native failure checks remain open; see the development log and lifecycle contract. In-memory Copy Last was brought forward from Stage 2; persistent history and safer destination handling remain planned.

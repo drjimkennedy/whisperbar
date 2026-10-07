@@ -2,6 +2,27 @@
 
 Record implemented changes separately from proposals. Keep entries newest first. Use repository-relative links and commit identifiers when available.
 
+## 2026-10-07 — Stage 1 session reliability
+
+**Status:** Implemented; 24 automated tests and native startup/duplicate-launch/dictation/cancellation smoke checks passed. Extended physical-device and permission checks remain open.
+**Starting commit:** `95c49a3`; implementation commit is available from this entry’s history.
+
+Extracted a platform-independent session coordinator and shortcut latch into `core/`; moved capture/recognition and macOS output/instance locking into `adapters/`; reduced `app.py` to the desktop shell and startup. Added explicit arming, recording, transcribing, delivering, cancelling, error, and closed states. Session IDs and cancellation flags prevent old callbacks/results from delivering or changing a later session. UI mutations now occur on the main thread through queued events.
+
+Added Escape/menu cancellation, repeat-safe shortcuts, rejection of triggers while busy, 300-second capture limit, sample-readiness/stall watchdogs, single-instance locking, bounded rotating logs, and safe microphone refresh gating. Kept device fallback, silence detection, and sample clipping. Direct float-array transcription eliminates app-created temporary WAV files. Added cancellable shortcut-release waiting before output, Accessibility-aware copy-only fallback, honest paste-request status, and in-memory Copy Last recovery. No persistent history or clipboard restoration yet.
+
+Verification:
+
+- `.venv/bin/python -m unittest discover -s tests`: 24 tests passed, including 100 simulated sequential sessions and 100 repeated key-downs, startup/inference/delivery-preparation cancellation, late results, capture failure/stall/limit, output failure recovery, cleanup, and instance lock behaviour.
+- `.venv/bin/python -m pip check`: no broken requirements. `git diff --check`: passed.
+- Parsed all changed Python sources without writing bytecode. A separate `compileall` attempt could not write macOS’s cache inside the sandbox; its permission request was cancelled. No claim is made that that command completed; imports, test execution, and parsing provide the syntax evidence.
+- Restarted the idle old process and launched the new app through `./launch.sh`. Model and UI initialized. A second actual launch exited with code 2 and an already-running message, without loading a duplicate model.
+- Normal live session captured 121995 samples (~7.625 s), transcribed 95 characters in 0.91 s, and requested paste. Jim confirmed that this first dictation pasted and the next recording, cancelled with Escape, did not paste. Transcript content is not retained in this log.
+
+Known limits: initial Stage 0 paste failure is not conclusively diagnosed. No destination-field validation or insertion receipt; output status intentionally says requested. No raw audio/transcript history on disk. Native mic removal, permission revocation, multiple target apps, and long-running inference cancellation still need manual validation. Cancellation cannot undo committed output or forcibly interrupt a blocking native call. The full Stage 1 platform gate remains open for these checks.
+
+Contracts and rationale: [lifecycle contract](contracts/session-lifecycle.md), [ADR 0002](decisions/0002-session-coordinator.md). Rollback: quit the new process and restore the previous revision; do not run an older unprotected instance alongside it. No package or persisted-data migration required. Next: finish the remaining native failure checks before closing Stage 1, then Stage 2 persistent recovery and safer delivery.
+
 ## 2026-10-07 — Stage 0 isolated setup and baseline
 
 **Status:** Setup implemented and verified on the development Mac; manual record/transcribe/paste smoke test passed on retry. Initial paste failure remains unresolved and must be investigated in the next reliability work.
