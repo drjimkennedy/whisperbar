@@ -110,6 +110,8 @@ launchctl load ~/Library/LaunchAgents/com.drjk.whisperbar.plist
 
 ## The PRD
 
+The next product phase is defined in the [robust-app PRD](docs/PRD-robust-whisperbar.md): staged Python upgrades, acceptance gates, and a later commercial technology-stack decision. Track implementation evidence in the [development log](docs/DEVELOPMENT-LOG.md) and architecture choices in the [decision record](docs/decisions/0001-python-first-portable-boundaries.md).
+
 The full spec that Claude used to build this — architecture, decision log, component breakdown — is at **[drjimkennedy.com/resources/whisperbar](https://drjimkennedy.com/resources/whisperbar)**.
 
 Built with Claude using the 90/500 Method: your judgment writes the spec, Claude's knowledge of code executes it.
