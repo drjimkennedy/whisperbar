@@ -308,7 +308,17 @@ if __name__ == "__main__":
     except Exception:
         log.exception("No input device found at startup")
     log.info("Loading Whisper model '%s'…", WHISPER_MODEL)
-    model = whisper.load_model(WHISPER_MODEL)
+    try:
+        model = whisper.load_model(WHISPER_MODEL)
+    except Exception:
+        log.exception("Unable to load Whisper model '%s'", WHISPER_MODEL)
+        print(
+            f"WhisperBar could not load model '{WHISPER_MODEL}'. "
+            "First use requires an internet connection and free disk space. "
+            "Check the connection, available storage, and whisperbar.log, then retry ./launch.sh.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     log.info("Model loaded. WhisperBar ready")
 
     app = WhisperBar()

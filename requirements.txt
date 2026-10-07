@@ -1,0 +1,9 @@
+# Direct runtime dependencies; use scripts/setup.sh for the pinned baseline.
+numpy==2.0.2
+openai-whisper==20240930
+PyAutoGUI==0.9.54
+pyperclip==1.11.0
+pynput==1.8.1
+rumps==0.4.0
+sounddevice==0.5.5
+scipy==1.13.1

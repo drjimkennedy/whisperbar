@@ -1,210 +1,61 @@
-# WhisperBar — Playbook
+# WhisperBar operations playbook
 
-System-wide macOS dictation powered by local Whisper. Press a hotkey from any app, speak, press again — transcript pastes back wherever your cursor was.
+Updated 2026-10-07 for the Stage 0 Python baseline. The upgrade [PRD](docs/PRD-robust-whisperbar.md) describes proposed work; the [development log](docs/DEVELOPMENT-LOG.md) records delivered changes and verification.
 
----
+## Setup and launch
 
-## What It Does
+From the checkout, run `./scripts/setup.sh`, then `./launch.sh`. Setup currently targets macOS arm64 / Python 3.9 and requires ffmpeg on PATH. See the [README](README.md) for prerequisites and interpreter selection. The launcher runs only the project environment and never silently falls back to another Python.
 
-- Menu bar app — lives at `🎙` in the macOS menu bar
-- Global hotkey (default: `⌥Space`) works in any app: browser, email, notes, Slack, code editor
-- Records audio from your mic, transcribes locally via OpenAI Whisper (no API key, no internet required)
-- Auto-pastes result back to wherever focus was
+The model is `small` in `config.py`, with English recognition and 16 kHz mono capture. First model use downloads weights; subsequent local use uses the model cache. The menu bar icon appears after model loading. Stage 3 will improve startup feedback.
 
----
+If upgrading from the earlier shared environment, the original local environment has been preserved as `.venv-legacy/`. The new `.venv` is isolated. Do not move or distribute virtual environments; recreate them through setup. Launch the old app with `/usr/bin/python3 app.py` only as a local emergency fallback if those machine packages still exist, not as portable installation guidance.
 
-## Prerequisites
+## Everyday operation
 
-All already installed on this machine:
+- Option+Space starts recording; press again to stop and transcribe.
+- Menu bar: microphone icon is idle, red is recording, hourglass is processing, warning is an error.
+- Microphone menu selects an input; Refresh device list re-enumerates devices. Selection does not yet persist across restarts.
+- Output overwrites the clipboard and attempts Command-V into the active field. Focus validation and history are planned, not implemented.
+- Configuration changes in `config.py` require restart. No cancellation or single-instance protection exists yet; quit an existing copy before launching another.
 
-| Dependency | Purpose | Installed via |
-|---|---|---|
-| `openai-whisper` | Transcription engine | pip |
-| `sounddevice` | Mic capture | pip |
-| `numpy` | Audio array handling | pip |
-| `scipy` | WAV file writing | pip |
-| `pyperclip` | Clipboard write | pip |
-| `pyautogui` | Simulate ⌘V paste | pip |
-| `rumps` | macOS menu bar UI | pip |
-| `pynput` | Global hotkey listener | pip |
-| `ffmpeg` | Audio decode (Whisper dependency) | Homebrew |
+## Permissions and troubleshooting
 
----
+Grant the launching app/interpreter the applicable Microphone, Input Monitoring, and Accessibility permissions in macOS settings. Restart after changing permissions. Actual behaviour must be manually tested on each supported macOS/runtime combination.
 
-## Running the App
-
-WhisperBar starts automatically at login (see [Auto-start at Login](#auto-start-at-login) below). The `🎙` icon appears in the menu bar — no terminal needed.
-
-To launch manually from terminal:
-
-```bash
-whisperbar
-```
-
-(Alias added to `~/.zshrc`. Open a new terminal tab if it's not recognised yet.)
-
-Or directly:
-
-```bash
-cd ~/code/whisper
-python3 app.py
-```
-
-The terminal output confirms the model is loaded:
-
-```
-Loading Whisper model 'base'…
-Model loaded. Starting WhisperBar…
-```
-
-### macOS Permissions (first run only)
-
-Two permissions are required — both must be granted in **System Settings → Privacy & Security**:
-
-| Permission | Section | Purpose |
-|---|---|---|
-| Microphone | Privacy & Security → Microphone | Audio capture |
-| Input Monitoring | Privacy & Security → Input Monitoring | Global hotkey detection |
-| Accessibility | Privacy & Security → Accessibility | Simulated ⌘V paste |
-
-> **Note:** The warning `"This process is not trusted! Input event monitoring will not be possible"` means Terminal.app is missing from either Input Monitoring or Accessibility — add it to both and restart.
-
-After granting permissions, quit and relaunch once.
-
----
-
-## Using It
-
-| Action | What Happens |
+| Symptom | Action |
 |---|---|
-| `⌥Space` | Recording starts — icon changes to `🔴` |
-| `⌥Space` again | Recording stops — icon changes to `⏳` while transcribing |
-| Transcription complete | Text is pasted at cursor — icon returns to `🎙` |
+| Missing environment/package | Run `./scripts/setup.sh`; start with `./launch.sh`, not bare `python3` |
+| Setup rejects interpreter/platform | Supply the tested Python 3.9 interpreter; other platforms/runtimes need a separate compatibility evaluation |
+| Missing ffmpeg | Install `brew install ffmpeg`; ensure its executable is on PATH |
+| Model load/download fails | Check connection and disk space, inspect `whisperbar.log`, retry launcher; this is distinct from package setup |
+| No microphone audio | Check permissions, selected/default input and mute status; refresh device list |
+| Shortcut does nothing | Check input/accessibility permissions and shortcut conflicts |
+| Text does not paste | Check Accessibility and focus; current app has no persistent transcript recovery |
+| App appears stuck | Inspect `whisperbar.log`, quit/restart; session coordination fixes are Stage 1 |
 
-Click the menu bar icon at any time to see current status, shortcut, and model.
+The current runtime logs are in `whisperbar.log` beside `app.py`. Log rotation is not yet implemented. Do not distribute logs without reviewing them.
 
----
-
-## Configuration
-
-All settings are in `config.py` — one file, three options:
-
-```python
-SHORTCUT_KEY = "option+space"   # change this if ⌥Space conflicts
-WHISPER_MODEL = "base"          # tiny / base / small / medium / large
-SAMPLE_RATE = 16000             # leave this alone — Whisper expects 16kHz
-```
-
-**Shortcut format:** `modifier+key`
-- Modifiers: `option`, `cmd`, `ctrl`, `shift`
-- Examples: `"cmd+shift+space"`, `"ctrl+option+d"`
-
-**Model tradeoffs:**
-
-| Model | Speed | Accuracy | Use when |
-|---|---|---|---|
-| `tiny` | ~instant | basic | quick notes, known vocabulary |
-| `base` | fast | good | **default — best everyday balance** |
-| `small` | 2–3s | better | technical terms, accents |
-| `medium` | 5–8s | high | longer dictations where accuracy matters |
-
-Change the model in `config.py`, then restart the app. Model files are cached at `~/.cache/whisper/` — first use of a new model downloads it once.
-
----
-
-## How It Works
-
-```
-⌥Space pressed
-    → start_recording() opens sounddevice InputStream at 16kHz
-    → audio_callback() appends mic frames to audio_frames[]
-
-⌥Space pressed again
-    → recording flag set False, stream closed
-    → stop_and_transcribe() runs on a background thread
-    → numpy concatenates frames → int16 WAV written to temp file
-    → whisper model.transcribe() runs on the WAV
-    → text written to clipboard via pyperclip
-    → pyautogui simulates ⌘V to paste
-    → temp file deleted, icon resets to 🎙
-```
-
-The hotkey listener (`pynput`) runs on its own daemon thread. Transcription also runs on a daemon thread so the menu bar UI never blocks.
-
----
-
-## Troubleshooting
-
-**Hotkey does nothing**
-- Check Accessibility permission: System Settings → Privacy & Security → Accessibility → confirm `python3` or `Terminal` is listed and enabled
-- Restart the app after granting permission
-
-**Text doesn't paste**
-- Accessibility permission is the usual cause — see above
-- The 0.15s delay before paste (`time.sleep(0.15)`) gives focus time to return to the previous app; if your machine is slow, bump this to `0.3` in `app.py:72`
-
-**Transcription is slow**
-- You're probably on `small` or larger — switch back to `base` in `config.py`
-- On Apple Silicon, Whisper runs on CPU by default (`fp16=False` is set intentionally for MPS compatibility)
-
-**`🔴` stays on / app seems stuck**
-- A crash during transcription can leave the icon stuck — quit from the menu bar and relaunch
-- Check Terminal output for the Python traceback
-
-**`⌥Space` conflict**
-- macOS Spotlight sometimes claims `⌥Space` — check System Settings → Keyboard Shortcuts → Spotlight
-- Change `SHORTCUT_KEY` in `config.py` to avoid the conflict
-
----
-
-## Auto-start at Login
-
-WhisperBar is registered as a launchd agent — it starts automatically when you log in, no terminal required.
-
-**Files:**
-- `~/code/whisper/launch.sh` — shell wrapper called by launchd
-- `~/Library/LaunchAgents/com.drjk.whisperbar.plist` — launchd service definition
-
-**To stop auto-start:**
-```bash
-launchctl unload ~/Library/LaunchAgents/com.drjk.whisperbar.plist
-```
-
-**To re-enable auto-start:**
-```bash
-launchctl load ~/Library/LaunchAgents/com.drjk.whisperbar.plist
-```
-
-**Logs** (if something goes wrong at startup):
-```bash
-cat ~/code/whisper/whisperbar.log
-```
-
----
-
-## Shell Alias
-
-`whisperbar` is aliased in `~/.zshrc`:
+## Verification and baseline measurement
 
 ```bash
-alias whisperbar="cd ~/code/whisper && python3 app.py"
+.venv/bin/python -m pip check
+.venv/bin/python scripts/check_environment.py
+.venv/bin/python -m unittest discover -s tests
+.venv/bin/python scripts/benchmark.py
 ```
 
-Useful if you ever need to relaunch manually from a terminal (e.g. after a crash or config change).
+The benchmark defaults to ten seconds of synthetic silence and reads the cached `small.pt`; it does not download a model, open a microphone, or paste. This measures inference plumbing, not speech accuracy or full dictation latency. For a consented recording:
 
----
-
-## Files
-
+```bash
+.venv/bin/python scripts/benchmark.py --audio /path/to/sample.wav --runs 5
 ```
-~/code/whisper/
-├── app.py              — full app (audio, transcription, menu bar, hotkey)
-├── config.py           — shortcut, model, sample rate
-├── launch.sh           — shell wrapper for launchd auto-start
-├── whisperbar.log      — stdout/stderr from auto-start launches
-├── plan.md             — original build plan and decisions log
-└── PLAYBOOK.md         — this file
 
-~/Library/LaunchAgents/
-└── com.drjk.whisperbar.plist  — launchd service (runs at login)
-```
+The JSON includes decoded-audio and model checksums, inference times, environment versions, and output character counts; it excludes transcript text and full audio paths. First inference is separate from warm runs. Model-load timing is not a cold disk-cache measurement. Record hardware identity alongside results. Do not claim p95 from these small runs.
+
+Manual smoke test: quit any running copy, launch, focus a non-sensitive Notes document, dictate one sentence, stop, verify one correct paste and return to idle. Record microphone, permissions, hardware/OS, and outcome. This is required to close Stage 0.
+
+## Login startup and recovery
+
+The README includes a launchd example. This checkout does not prove that a login agent or shell alias is currently installed. Configure login startup only after a manual launch works. Its command should call this checkout’s `launch.sh`, which uses `.venv`.
+
+Dependency changes require updating both direct and full baseline pins, a fresh isolated install, `pip check`, imports, and the relevant manual smoke test. Preserve prior pin files in Git and record migrations in the development log. To roll back code, use a known Git revision and recreate its environment; do not assume a newer environment is compatible.

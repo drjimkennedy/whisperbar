@@ -1,13 +1,13 @@
 # WhisperBar: from personal utility to a dependable macOS product
 
-**Slug:** whisperbar-robust-product-prd  
-**Created:** 2026-10-07  
-**Revised:** 2026-10-07 10:40 AEST  
+**Slug:** whisperbar-robust-product-prd
+**Created:** 2026-10-07
+**Revised:** 2026-10-07 11:19 AEST
 **Status:** Proposed
 
 ## NOW
 
-- [ ] Establish a reproducible Python installation and record a measured baseline on Jim’s Mac.
+- [ ] Investigate the initial paste failure; the Stage 0 smoke test passed on retry, with evidence in the development log.
 - [ ] Implement the Stage 1 recording coordinator, cancellation, and repeat-safe shortcuts.
 - [ ] Run the Stage 1 failure scenarios and record evidence before adding further features.
 
@@ -19,9 +19,9 @@ The immediate product promise is dependable local dictation: users can tell when
 
 Handy is a useful reference: the inspected repository uses a Rust backend with Tauri and React/TypeScript, multiple transcription engines, speech detection, persistent history, and explicit recording coordination. Borrow behaviours and architectural boundaries; do not assume its entire stack is necessary for this product.
 
-Build portability into the work now through versioned data formats, replaceable platform and inference adapters, language-neutral acceptance scenarios, decision records, and an evidence-backed development log. The current environment repair is only a local workaround: it inherits installed Python packages and is not yet a reproducible customer installation.
+Build portability into the work now through versioned data formats, replaceable platform and inference adapters, language-neutral acceptance scenarios, decision records, and an evidence-backed development log. Stage 0 now has a tested isolated development installation and initial inference measurements. Customer packaging, newer-runtime compatibility, and clean-machine distribution remain later validation work.
 
-This document defines proposed requirements, not completed functionality. Jim owns product priorities and the eventual commercial decision; implementation work must record what actually shipped and what was tested.
+This document defines proposed requirements; completed Stage 0 work and remaining verification are tracked in the development log. Jim owns product priorities and the eventual commercial decision; implementation work must record what actually shipped and what was tested.
 
 ## 1. Product goal and audience
 
@@ -203,3 +203,5 @@ Open decisions: supported OS/hardware; initial distribution route; confirmed lat
 2026-10-07: Created the Python-first product roadmap, measurable stage gates, migration boundaries, data rules, and baseline record. No upgrade-stage implementation is claimed.
 
 When revising, preserve the original creation date, update Revised/status, distinguish evidence from proposals, recompute the NOW items, and append a dated note for changed scope or decisions. Preserve superseded targets and their rationale in decision records rather than silently rewriting history.
+
+2026-10-07 11:19 AEST: Stage 0 isolated setup, preflight, dependency pins, failure checks, and baseline measurement implemented. Manual paste succeeded on retry after an initial failure; retain that failure as an unresolved reliability issue. Historical environment-repair notes above describe the earlier state, now superseded by the isolated installation.

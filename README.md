@@ -21,17 +21,26 @@ A menu-bar icon (`🎙`) shows you what's happening. One hotkey starts and stops
 
 ## Prerequisites
 
-### Python packages
+### Reproducible development setup
 
-```bash
-pip install sounddevice numpy scipy openai-whisper pyperclip pyautogui rumps pynput
-```
+The current tested baseline is **macOS arm64 with CPython 3.9.6**. This preserves the existing app for measurement; it is not the final customer runtime or a supported-platform promise. Python/runtime modernization remains an explicit follow-up before commercial packaging.
 
-### System (Homebrew)
+Install `ffmpeg` if needed, then run the setup script:
 
 ```bash
 brew install ffmpeg
+./scripts/setup.sh
 ```
+
+Setup uses `/usr/bin/python3` by default. If that is not Python 3.9, provide an appropriate interpreter:
+
+```bash
+WHISPERBAR_PYTHON=/path/to/python3.9 ./scripts/setup.sh
+```
+
+The script creates an isolated `.venv`, installs the complete version-pinned [baseline dependencies](requirements/macos-arm64-py39.txt), and checks dependencies and prerequisites. Downloads need internet access. It refuses an existing environment that inherits machine packages; preserve that environment elsewhere before setup. Never copy a virtual environment between machines—recreate it.
+
+`requirements.txt` documents direct dependencies. The platform-specific file also pins transitive dependencies; neither file is a hash-verified artifact lock. Installed system tools and model files remain separate prerequisites.
 
 ### macOS permissions
 
@@ -48,7 +57,7 @@ Go to **System Settings → Privacy & Security** and grant:
 ## Run it
 
 ```bash
-python3 app.py
+./launch.sh
 ```
 
 The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, press again to transcribe and paste.
@@ -61,11 +70,11 @@ Edit `config.py` — three settings, nothing else needs touching:
 
 ```python
 SHORTCUT_KEY = "option+space"   # change if it conflicts
-WHISPER_MODEL = "base"          # tiny / base / small / medium / large
+WHISPER_MODEL = "small"         # tiny / base / small / medium / large
 SAMPLE_RATE = 16000             # what Whisper expects — leave this alone
 ```
 
-`WHISPER_MODEL` is the speed-vs-accuracy dial. `base` is the sweet spot for most people — feels near-instant and accurate enough for normal speech.
+`WHISPER_MODEL` controls the speed/accuracy tradeoff. The current configuration is `small`; compare models on your own recordings before changing it.
 
 ---
 
@@ -73,7 +82,7 @@ SAMPLE_RATE = 16000             # what Whisper expects — leave this alone
 
 So the icon is just always there — no terminal, no ritual.
 
-1. Edit `launch.sh` if needed (it uses `$(dirname "$0")` so it works from any location)
+1. Complete setup first. `launch.sh` resolves its own location and runs the project’s isolated `.venv`.
 2. Create a launchd agent:
 
 ```bash

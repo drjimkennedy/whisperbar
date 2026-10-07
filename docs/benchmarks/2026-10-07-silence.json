@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "fixture": "synthetic-silence-10s",
+  "audio_sha256": "3d00ed86b663cd1b8ac82b105257cd109412f92dca442048532439f920a7f645",
+  "audio_seconds": 10.0,
+  "model_file": "small.pt",
+  "model_sha256": "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794",
+  "python": "3.9.6",
+  "macos": "27.0.1",
+  "architecture": "arm64",
+  "device": "cpu",
+  "fp16": false,
+  "whisper": "20240930",
+  "torch": "2.8.0",
+  "model_load_seconds": 0.767,
+  "inference_seconds": [
+    0.618,
+    0.419,
+    0.414
+  ],
+  "warm_median_seconds": 0.4165,
+  "output_characters": [
+    3,
+    3,
+    3
+  ],
+  "scope": "Inference only; no microphone, hotkey, insertion, accuracy, or p95 validation. Model load may use OS disk cache."
+}

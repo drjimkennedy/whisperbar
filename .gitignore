@@ -3,6 +3,8 @@
 
 # Local Python environment
 .venv/
+.venv-legacy/
+__pycache__/
 
 # Log files
 *.log
