@@ -2,6 +2,25 @@
 
 Record implemented changes separately from proposals. Keep entries newest first. Use repository-relative links and commit identifiers when available.
 
+## 2026-10-07 — Stage 3 visible feedback and startup
+
+**Status:** Implemented; normal-window and full-screen native feedback/insertion, cancellation, and setup-dialog checks passed on the MacBook display. The hint was observed during calibration; final near-silent-input routing is covered by automated tests, with a native muted-input check still pending.
+**Starting commit:** `6c437dd`.
+
+Added a nonactivating, click-through Cocoa panel with distinct starting/recording/transcribing/inserting/cancelling/error states, elapsed recording time, an RMS input-level bar, a quiet-input hint, and timed completion/error feedback. The menu retains result text after the panel hides. Presentation logic is independent of Cocoa; transient scalar meter samples do not enter history or logs. See the [feedback contract](contracts/feedback-and-startup.md) and [ADR 0004](decisions/0004-nonactivating-feedback-and-background-loading.md).
+
+The menu shell now initializes before a background worker imports Whisper/Torch and loads the model. Recording remains blocked until ready. A failed load leaves Retry model loading in the app, with no terminal interaction needed to retry. Late model results after shutdown are ignored. Added an explicit setup dialog showing selected input, model state, shortcut, Input Monitoring, Accessibility, and microphone authorization. Read-only AVFoundation checks use the existing bridge; denied/restricted microphone access produces an actionable capture error, and PortAudio errors include recovery guidance. No runtime dependency or persistent schema changed.
+
+Validation: 59 automated tests passed, covering existing lifecycle/history protections plus deferred loading, shortcut gating, failed-load retry, post-shutdown completion, meter limits/staleness, quiet guidance, stable elapsed time, and microphone denial before stream creation. The earlier startup test expecting process exit on load failure was replaced with failure-and-retry UI tests because the intended behaviour changed. Tests mock native dialogs; they are not permission-revocation or display acceptance evidence.
+
+Native launch logged desktop startup at 12:58:21.998 AEST and model ready at 12:58:23.849; this single cached-model launch is not a latency benchmark. Jim confirmed the panel, moving meter, processing feedback, and automatic TextEdit insertion worked in a normal window on the MacBook screen. The live recording captured 253635 samples and produced 125 characters in 0.92 seconds; logs reported insertion into the verified field. Jim also confirmed Escape cancelled the next session without insertion, the panel dismissed, and the setup dialog opened and dismissed with Return. Transcript content is omitted.
+
+Jim subsequently tested full-screen TextEdit, reported seeing the recording panel during a four-second pause, and confirmed Option+Space inserted the text. He did not report a quiet-input hint; the distinction between ambient input remaining above threshold and a missing hint is not established. A pause alone does not prove near-zero microphone input.
+
+A temporary level-only diagnostic found the original RMS 0.001 threshold was crossed frequently during the pause; the longest below-threshold interval was only 0.16 seconds. A trial RMS 0.01 threshold displayed the hint, but Jim observed it while speaking. Rejected that aggressive threshold and returned to near-silent RMS 0.001, adding a 200 ms sustained-activity check so brief spikes do not reset the hint. Final wording is “Very little audio”, not a claim of silence or mute. Ordinary room-noise pauses are not a valid mute-warning acceptance test. Added regressions for quieter sustained input, brief spikes, and sample gaps. Removed the temporary diagnostic and restarted the final app. No raw audio or transcript text was saved for this investigation.
+
+Remaining validation: switching among multiple Spaces and external displays, a native muted-input check of the final hint, native microphone-permission denial, broader application/OS/accessibility coverage, and real model-download interruption. Fault-injection tests cover model failure and permission routing only. Packaging and a supported runtime upgrade remain later stages. Rollback: quit the app and restore Stage 2 code; history/settings formats and dependencies are unchanged.
+
 ## 2026-10-07 — Stage 2 native acceptance follow-up
 
 **Status:** Stage 2 accepted on the current Mac. Changed-focus protection, manual recovery, native export, and native import without duplicates passed.

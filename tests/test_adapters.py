@@ -10,6 +10,18 @@ from adapters.desktop import InstanceLock, Output
 
 
 class AudioTests(unittest.TestCase):
+    def setUp(self):
+        permission = patch('adapters.audio.microphone_permission', return_value='allowed')
+        permission.start()
+        self.addCleanup(permission.stop)
+
+    def test_denied_microphone_does_not_open_stream(self):
+        with patch('adapters.audio.microphone_permission', return_value='denied'), \
+                patch('adapters.audio.sd.InputStream') as stream:
+            with self.assertRaisesRegex(RuntimeError, 'Microphone permission denied'):
+                Capture(None, 16000, 1).start(lambda: None)
+            stream.assert_not_called()
+
     def test_silence_rejected_and_peaks_clipped(self):
         capture = Capture(None, 16000, 1)
         capture.frames = [np.zeros((20, 1), dtype=np.float32)]

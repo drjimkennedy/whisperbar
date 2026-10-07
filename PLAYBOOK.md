@@ -1,19 +1,19 @@
 # WhisperBar operations playbook
 
-Updated 2026-10-07 for the Stage 2 history and safe insertion. The upgrade [PRD](docs/PRD-robust-whisperbar.md) describes proposed work; the [development log](docs/DEVELOPMENT-LOG.md) records delivered changes and verification.
+Updated 2026-10-07 for Stage 3 startup and recording feedback. The upgrade [PRD](docs/PRD-robust-whisperbar.md) describes proposed work; the [development log](docs/DEVELOPMENT-LOG.md) records delivered changes and verification.
 
 ## Setup and launch
 
 From the checkout, run `./scripts/setup.sh`, then `./launch.sh`. Setup currently targets macOS arm64 / Python 3.9 and requires ffmpeg on PATH. See the [README](README.md) for prerequisites and interpreter selection. The launcher runs only the project environment and never silently falls back to another Python.
 
-The model is `small` in `config.py`, with English recognition and 16 kHz mono capture. First model use downloads weights; subsequent local use uses the model cache. The menu bar icon appears after model loading. Stage 3 will improve startup feedback.
+The default model is `small`, with English recognition and 16 kHz mono capture. Saved model preferences override the default. First model use downloads weights; subsequent use uses the model cache. The menu appears before background model loading, with visible loading feedback. Recording is enabled only when ready; failed loading can be retried from the menu.
 
 If upgrading from the earlier shared environment, the original local environment has been preserved as `.venv-legacy/`. The new `.venv` is isolated. Do not move or distribute virtual environments; recreate them through setup. Launch the old app with `/usr/bin/python3 app.py` only as a local emergency fallback if those machine packages still exist, not as portable installation guidance.
 
 ## Everyday operation
 
 - Option+Space starts recording; press again to stop and transcribe. Repeated key-down events do not toggle again. A second press during microphone startup cancels that attempt. Presses during processing are ignored.
-- Menu bar: microphone icon is idle, red appears after actual audio samples arrive, hourglass is starting/processing/cancelling, warning is an error. Open the menu for the full status.
+- Menu bar and floating panel distinguish starting, recording, transcribing, inserting, cancelling, and errors. Recording shows a timer and live input level; the panel does not take keyboard focus. Open the menu for the last result after the panel disappears.
 - Microphone menu selects an input; Refresh device list re-enumerates devices. Selection persists across restarts.
 - Output verifies the original application, window, editable field, and selection, then requests direct Accessibility insertion. Unsupported or changed destinations require Copy Last; automatic output never touches the clipboard.
 - Escape or Cancel dictation cancels recording or suppresses pending output. Inference may finish internally before a new session can start. Cancellation cannot undo a paste once delivery has begun. Escape is not swallowed and may also affect the focused application.
@@ -30,8 +30,8 @@ Grant the launching app/interpreter the applicable Microphone, Input Monitoring,
 | Missing environment/package | Run `./scripts/setup.sh`; start with `./launch.sh`, not bare `python3` |
 | Setup rejects interpreter/platform | Supply the tested Python 3.9 interpreter; other platforms/runtimes need a separate compatibility evaluation |
 | Missing ffmpeg | Install `brew install ffmpeg`; ensure its executable is on PATH |
-| Model load/download fails | Check connection and disk space, inspect `whisperbar.log`, retry launcher; this is distinct from package setup |
-| No microphone audio | Check permissions, selected/default input and mute status; refresh device list |
+| Model load/download fails | Check connection and disk space, then choose Retry model loading; the app stays open. Inspect `whisperbar.log` if it fails again |
+| No microphone audio | Open Setup and permissions, check the input and permission report, and check mute status. A low meter alone cannot identify the cause; refresh the device list if needed |
 | Shortcut does nothing | Check input/accessibility permissions and shortcut conflicts |
 | Text does not paste | Use Copy last transcript and paste manually. Check Accessibility and keep the original field/selection focused; unsupported fields need manual copying |
 | Microphone cleanup failed — restart app | Quit and relaunch; new recording and microphone refresh are deliberately blocked while the native stream state is uncertain |
@@ -71,3 +71,9 @@ First-run choice: Keep last 20 or No history. Jim selected Keep last 20. Data is
 If storage fails, Copy Last remains available in memory and the menu reports the failure. Preserve unknown/corrupt files before attempting recovery; startup rejects unsupported schemas instead of overwriting them. See the [data contract](docs/contracts/history-and-delivery.md). Before rolling back to Stage 1, export valuable history and quit the current process. Stage 1 cannot read history or persistent preferences and overwrites the clipboard during delivery.
 
 Verified on this Mac: first-run Keep last 20 choice, TextEdit Copy Last fallback, corrected automatic TextEdit insertion, and history visible after restart. Jim also confirmed changed-focus protection with Copy Last recovery, export through the save panel, and same-file import through the open panel without duplicates. Stage 2 is accepted on this Mac; wider application coverage remains pending. Automated checks additionally cover target changes and JSON round-trips.
+
+## Stage 3 feedback checks
+
+Verified on the MacBook display: panel, input meter, processing and insertion in ordinary TextEdit; full-screen panel and insertion; Escape cancellation and panel dismissal; setup dialog opened and dismissed with Return. The “Very little audio” hint is inside the panel, not a separate popup. It requires three seconds without sustained input above the near-silent threshold; brief spikes are ignored. Background sound can prevent it during an ordinary pause. A more aggressive trial threshold warned during speech and was rejected. The hint surface was observed, but native muted-input validation of the final threshold remains open.
+
+The panel reports status without taking focus or accepting clicks. Completion hides after five seconds and errors after ten; the menu retains the last result. Loading and model failures remain visible until resolved. Setup reports permissions without changing them. Other displays, switching Spaces, and broader accessibility coverage remain pending.

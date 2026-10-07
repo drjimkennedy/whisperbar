@@ -15,7 +15,7 @@ Press a hotkey from anywhere — browser, email, Slack, Notes — speak, press a
 ⌥Space → Mic → Buffer → Whisper (on-device) → History → Verified text field
 ```
 
-A menu-bar icon (`🎙`) shows you what's happening. One hotkey starts and stops recording. That's the entire interface.
+A menu-bar icon (`🎙`) and a small floating panel show what is happening. Recording includes elapsed time and a live input meter. The panel lets clicks pass through and does not take keyboard focus. One hotkey starts and stops recording; Escape cancels.
 
 ---
 
@@ -63,6 +63,8 @@ Go to **System Settings → Privacy & Security** and grant:
 The `🎙` icon appears in your menu bar. Press `⌥Space` to start recording, press again to transcribe and request a paste. Press **Escape** or choose **Cancel dictation** to cancel before delivery begins. If insertion fails, use **Copy last transcript** from the menu. On first run, choose **Keep last 20** or **No history**. Keeping history restores transcripts after restart; No history keeps Copy Last only until quit. Automatic insertion leaves your clipboard untouched; explicit Copy Last replaces it.
 
 Recording starts visibly when audio samples arrive and stops automatically after five minutes. Repeated key events and processing-time presses cannot create overlapping sessions. A second launch exits without opening a duplicate app. See the [session contracts](docs/contracts/session-lifecycle.md) for behaviour and test coverage.
+
+The menu appears before model loading finishes. Loading and processing have visible feedback; a model failure leaves **Retry model loading** available in the menu. **Setup and permissions…** reports the selected input and access status. Three seconds of very low input shows a mute/microphone hint; this is an activity check, not a diagnosis. See the [feedback contract](docs/contracts/feedback-and-startup.md) for timing and native verification requirements.
 
 ---
 
@@ -139,7 +141,7 @@ These were deliberately left out — each slots in without changing the signal c
 
 - **Push-to-talk mode** — a config flag branching in `toggle()`
 - **Multi-language** — remove the hard-pinned `language="en"` in `config.py`
-- **Floating waveform window** — an optional second UI surface; the signal chain is untouched
+- **Waveform visualization** — the current floating panel has an input level bar rather than a waveform
 
 ---
 

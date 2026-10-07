@@ -3,11 +3,10 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
-import runpy
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('preflight', ROOT / 'scripts/check_environment.py')
@@ -50,27 +49,6 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('brew install ffmpeg', text)
 
-
-class StartupTests(unittest.TestCase):
-    def test_model_failure_exits_with_recovery_instruction(self):
-        # Replace external imports to exercise the real entry point without GUI side effects.
-        modules = {name: MagicMock() for name in (
-            'numpy', 'sounddevice', 'scipy', 'scipy.io', 'scipy.io.wavfile',
-            'whisper', 'pyperclip', 'pyautogui', 'rumps', 'pynput')}
-        modules['rumps'].App = object
-        modules['sounddevice'].query_devices.return_value = {'name': 'test input'}
-        modules['whisper'].load_model.side_effect = OSError('simulated download failure')
-        output = io.StringIO()
-        with patch.dict(sys.modules, modules), patch('logging.FileHandler'), \
-             patch('logging.basicConfig'), patch('logging.getLogger'), \
-             patch('logging.handlers.RotatingFileHandler'), \
-             patch('adapters.desktop.InstanceLock') as lock, \
-             contextlib.redirect_stderr(output), self.assertRaises(SystemExit) as raised:
-            lock.return_value.acquire.return_value = True
-            runpy.run_path(str(ROOT / 'app.py'), run_name='__main__')
-        self.assertEqual(raised.exception.code, 1)
-        self.assertIn('could not load model', output.getvalue())
-        self.assertIn('retry ./launch.sh', output.getvalue())
 
 
 if __name__ == '__main__':

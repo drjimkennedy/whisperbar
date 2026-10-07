@@ -2,14 +2,14 @@
 
 **Slug:** whisperbar-robust-product-prd
 **Created:** 2026-10-07
-**Revised:** 2026-10-07 12:24 AEST
+**Revised:** 2026-10-07 13:11 AEST
 **Status:** Proposed
 
 ## NOW
 
 - [ ] Complete the remaining platform matrix, including native microphone permission denial; Accessibility denial and manual clipboard recovery now pass.
-- [ ] Verify output in additional target applications and native cancellation timing; cancellation during actual synthetic-audio inference now passes.
-- [ ] Begin Stage 3 startup and recording feedback; Stage 2 native acceptance is complete on the current Mac.
+- [ ] Extend native checks to external displays, switching Spaces, additional target applications, and measured cancellation timing.
+- [ ] Confirm the Stage 3 low-input hint under near-zero input before closing its remaining feedback checks.
 
 ## Executive Summary
 
@@ -21,7 +21,7 @@ Handy is a useful reference: the inspected repository uses a Rust backend with T
 
 Build portability into the work now through versioned data formats, replaceable platform and inference adapters, language-neutral acceptance scenarios, decision records, and an evidence-backed development log. Stage 0 now has a tested isolated development installation and initial inference measurements. Customer packaging, newer-runtime compatibility, and clean-machine distribution remain later validation work.
 
-This document defines the roadmap; Stage 0–2 implementation and remaining verification are tracked in the development log. Jim owns product priorities and the eventual commercial decision; implementation work must record what actually shipped and what was tested.
+This document defines the roadmap; Stage 0–3 implementation and remaining verification are tracked in the development log. Jim owns product priorities and the eventual commercial decision; implementation work must record what actually shipped and what was tested.
 
 ## 1. Product goal and audience
 
@@ -215,3 +215,7 @@ When revising, preserve the original creation date, update Revised/status, disti
 2026-10-07: At Jim’s request, implemented Stage 2 while carrying forward incomplete Stage 1 native checks explicitly. Added optional last-20 SQLite history, versioned JSON interchange/preferences, deletion, and direct target-validated insertion that leaves the clipboard untouched. Jim selected Keep last 20 and confirmed TextEdit automatic insertion plus history visible after restart; earlier Copy Last fallback also passed. Fixed first-run UI ordering and PyObjC tuple selection-range handling during native checks. Wider native validation remains open; see the data contract and ADR 0003.
 
 2026-10-07 12:24 AEST: Stage 2 accepted on the current Mac. Jim confirmed switching away from TextEdit prevented automatic insertion, Copy Last recovered the sentence, the export dialog saved a JSON file, and importing that file produced no duplicate records. Stage 3 can begin; wider compatibility and the carried-forward Stage 1 checks remain explicit release work.
+
+2026-10-07 13:03 AEST: Stage 3 implemented: nonactivating click-through status panel, live RMS meter, elapsed recording time, quiet-input guidance, background model import/loading, in-app retry, and setup/permission reporting. Fifty-six tests passed. Jim confirmed panel/meter/processing/insertion in ordinary TextEdit on the MacBook display, cancellation with no output, setup dialog keyboard dismissal, and insertion with the panel visible in full-screen TextEdit. A quiet pause did not establish the low-input hint because actual signal level is unconfirmed. External displays, switching Spaces, and wider platform/failure checks remain open; see the feedback contract and development log.
+
+2026-10-07 13:11 AEST: Refined the input hint after native testing. The initial near-zero threshold did not trigger during room-noise pauses; an increased threshold warned during quieter speech and was rejected. Final behaviour checks near-silent RMS input with brief-spike protection and says “Very little audio”. It is not speech detection and does not stop recording. Temporary level-only diagnostics were removed; the final 59 automated tests pass. Native muted-input validation remains open; the actual hint surface was observed during calibration.

@@ -4,6 +4,7 @@ import threading
 import time
 import numpy as np
 import sounddevice as sd
+from adapters.permissions import microphone_permission
 
 log = logging.getLogger('whisperbar')
 
@@ -30,7 +31,7 @@ class AudioDevices:
 
 
 class Capture:
-    def __init__(self, devices, sample_rate, max_seconds):
+    def __init__(self, devices, sample_rate, max_seconds, report_level=lambda rms, timestamp: None):
         self.devices = devices
         self.sample_rate = sample_rate
         self.limit = sample_rate * max_seconds
@@ -40,8 +41,12 @@ class Capture:
         self.lock = threading.Lock()
         self.last_sample_at = 0
         self.accepting = False
+        self.report_level = report_level
 
     def start(self, ready):
+        permission = microphone_permission()
+        if permission in ('denied', 'restricted'):
+            raise RuntimeError('Microphone permission ' + permission + ' — enable access in System Settings, then restart')
         with self.devices.lock:
             sd._terminate()
             sd._initialize()
@@ -66,10 +71,16 @@ class Capture:
                         self.samples += len(frame)
                 if first:
                     ready()
+                # Latest scalar telemetry only; never enqueue audio or mutate Cocoa.
+                rms = float(np.sqrt(np.mean(np.square(indata))))
+                self.report_level(rms if np.isfinite(rms) else 0.0, self.last_sample_at)
 
-            self.stream = sd.InputStream(samplerate=self.sample_rate, channels=1,
-                                         dtype='float32', device=index, callback=callback)
-            self.stream.start()
+            try:
+                self.stream = sd.InputStream(samplerate=self.sample_rate, channels=1,
+                                             dtype='float32', device=index, callback=callback)
+                self.stream.start()
+            except sd.PortAudioError as exc:
+                raise RuntimeError('Microphone unavailable — check permission and selected input, then retry') from exc
             log.info('Microphone stream started (device=%s)', name)
 
     def close(self):

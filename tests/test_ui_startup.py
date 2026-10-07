@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from storage.settings import Settings
 from storage.history import History
+from ui.overlay import Overlay  # Register native class once, outside sys.modules patches.
 
 
 class Menu(dict):
@@ -19,7 +20,7 @@ class Menu(dict):
 
 class Shell:
     def __init__(self, *_args, **_kwargs):
-        pass
+        self.title = "🎙"
 
 
 class StartupTests(unittest.TestCase):
@@ -37,6 +38,7 @@ class StartupTests(unittest.TestCase):
         self.patches = [patch.object(self.module, 'data_directory', return_value=self.path),
                         patch.object(self.module.AudioDevices, 'refresh', return_value=[]),
                         patch.object(self.module.keyboard, 'Listener'),
+                        patch.object(self.module, 'Overlay'),
                         patch.object(self.module, 'NSApplication')]
         for item in self.patches:
             item.start()
@@ -76,3 +78,50 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(app.controller.last_text, 'recover me')
         self.assertEqual(app.devices.selected, 'Test mic')
         self.assertEqual(app.values['shortcut'], 'ctrl+space')
+
+    def test_model_load_is_deferred_and_hotkey_blocked_until_ready(self):
+        preferences = Settings(self.path)
+        preferences.save(history_enabled=False)
+        app = self.module.WhisperBar(None, preferences)
+        with patch.object(self.module, 'load_model') as load, \
+                patch.object(self.module.threading, 'Thread') as thread, \
+                patch.object(app.controller, 'toggle') as toggle:
+            load.assert_not_called()
+            self.assertFalse(app.toggle_dictation())
+            toggle.assert_not_called()
+            app.process_events(None)
+            thread.assert_called_once()
+            thread.call_args.kwargs['target']()
+            load.assert_called_once_with('small')
+            app.process_events(None)
+            self.assertTrue(app.model_ready)
+            app.toggle_dictation()
+            toggle.assert_called_once()
+
+    def test_failed_model_stays_in_ui_and_retry_recovers(self):
+        preferences = Settings(self.path)
+        preferences.save(history_enabled=False)
+        app = self.module.WhisperBar(None, preferences)
+        with patch.object(self.module, 'load_model', side_effect=OSError('offline')), \
+                patch.object(self.module.threading, 'Thread') as thread:
+            app.process_events(None)
+            thread.call_args.kwargs['target']()
+            app.process_events(None)
+        self.assertFalse(app.model_ready)
+        self.assertTrue(app.model_failed)
+        self.assertIn('Retry model loading', app.status_item.title)
+        with patch.object(self.module, 'load_model', return_value=MagicMock()), \
+                patch.object(self.module.threading, 'Thread') as thread:
+            app.retry_model()
+            thread.call_args.kwargs['target']()
+            app.process_events(None)
+        self.assertTrue(app.model_ready)
+        self.assertFalse(app.model_failed)
+
+    def test_shutdown_ignores_late_model_result(self):
+        app = self.module.WhisperBar(None)
+        app.shutdown()
+        app.model_events.put((MagicMock(), None))
+        app.process_events(None)
+        self.assertFalse(app.model_ready)
+        self.assertIsNone(app.overlay)

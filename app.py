@@ -5,24 +5,36 @@ from pathlib import Path
 from queue import Empty, Queue
 import sys
 import threading
+import time
 from datetime import datetime
 
 from AppKit import NSOpenPanel, NSSavePanel, NSModalResponseOK, NSApplication
 
 import pyperclip
 import rumps
-import whisper
 from pynput import keyboard
 
 from adapters.audio import AudioDevices, Capture, Recognizer
 from adapters.desktop import InstanceLock, Output
+from adapters.permissions import microphone_permission
 from core.session import Coordinator, State
 from core.shortcut import Chord
+from core.feedback import Feedback, Presentation, InputActivity
+from ui.overlay import Overlay
 from config import SHORTCUT_KEY, SAMPLE_RATE, WHISPER_MODEL, MAX_RECORDING_SECONDS
 from storage.settings import Settings, DEFAULTS, data_directory
 from storage.history import History
 
 log = logging.getLogger('whisperbar')
+
+
+def load_model(model_id):
+    # Importing torch/Whisper and loading weights must not block the UI loop.
+    import whisper
+    if model_id not in whisper.available_models():
+        raise ValueError('Unsupported model preference')
+    return whisper.load_model(model_id)
+
 
 
 def configure_logging():
@@ -47,9 +59,21 @@ def parse_shortcut(shortcut):
 
 
 class WhisperBar(rumps.App):
-    def __init__(self, model, preferences=None, model_id=WHISPER_MODEL, settings_error=None):
+    def __init__(self, model=None, preferences=None, model_id=WHISPER_MODEL, settings_error=None):
         super().__init__('🎙', quit_button=None)
         self.events = Queue()
+        self.feedback = Feedback()
+        self.overlay = None
+        self.model_events = Queue()
+        self.model_ready = model is not None
+        self.model_loading = False
+        self.model_attempted = model is not None
+        self.model_failed = False
+        self.closing = False
+        self.setup_open = False
+        self.ready_until = 0.0
+        self.audio_lock = threading.Lock()
+        self.input_activity = InputActivity()
         self.preferences = preferences
         self.values = dict(preferences.values) if preferences else {**DEFAULTS, 'history_enabled': False}
         self.model_id = model_id
@@ -70,7 +94,7 @@ class WhisperBar(rumps.App):
         self.devices.selected = self.values['microphone']
         self.output = Output()
         self.controller = Coordinator(
-            lambda: Capture(self.devices, SAMPLE_RATE, MAX_RECORDING_SECONDS),
+            self.create_capture,
             Recognizer(model), self.output.prepare, self.output.deliver, self.events.put,
             max_seconds=MAX_RECORDING_SECONDS, begin_session=self.output.begin,
             save_transcript=self.save_transcript, update_transcript=self.update_transcript,
@@ -82,7 +106,7 @@ class WhisperBar(rumps.App):
                 self.controller.last_text = records[0]['text'] if records else None
             except Exception:
                 self.startup_warning = 'Unable to read saved history — Copy Last starts empty'
-        self.status_item = rumps.MenuItem('Status: ' + (self.startup_warning or 'ready'))
+        self.status_item = rumps.MenuItem('Status: ' + (self.startup_warning or ('ready' if self.model_ready else 'loading model…')))
         self.history_menu = rumps.MenuItem('Transcript history')
         self.history_toggle = rumps.MenuItem('Keep last 20 transcripts', callback=self.toggle_history)
         self.history_toggle.state = self.values['history_enabled']
@@ -95,16 +119,87 @@ class WhisperBar(rumps.App):
         self.mic_menu = rumps.MenuItem('Microphone')
         self.cancel_item = rumps.MenuItem('Cancel dictation (Esc)', callback=self.cancel)
         self.copy_item = rumps.MenuItem('Copy last transcript', callback=self.copy_last)
+        self.retry_item = rumps.MenuItem('Retry model loading', callback=self.retry_model)
         self.menu = [self.status_item, self.cancel_item, self.copy_item, self.history_menu,
                      self.history_toggle, None, self.mic_menu, self.shortcut_item, self.model_menu,
-                     rumps.MenuItem(f'Active model: {model_id}'), None,
+                     rumps.MenuItem(f'Active model: {model_id}'),
+                     rumps.MenuItem('Setup and permissions…', callback=self.show_setup), self.retry_item, None,
                      rumps.MenuItem('Quit WhisperBar', callback=self.quit_app)]
-        self.chord = Chord(parse_shortcut(self.values['shortcut']), self.controller.toggle)
+        self.chord = Chord(parse_shortcut(self.values['shortcut']), self.toggle_dictation)
         self.output.held = lambda: self.chord.held()
         self.listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
         self.timer = rumps.Timer(self.process_events, 0.05)
         self.rebuild_mics()
         self.rebuild_history()
+
+    def create_capture(self):
+        with self.audio_lock:
+            self.input_activity = InputActivity()
+        return Capture(self.devices, SAMPLE_RATE, MAX_RECORDING_SECONDS, self.report_level)
+
+    def report_level(self, rms, timestamp):
+        with self.audio_lock:
+            self.input_activity.observe(rms, timestamp)
+
+    def toggle_dictation(self):
+        with self.controller.lock:
+            if self.model_ready and not self.onboarding_pending and not self.closing and not self.setup_open:
+                return self.controller.toggle()
+        # Hotkey callback must never touch Cocoa.
+        return False
+
+    def retry_model(self, _sender=None):
+        if self.model_loading or self.model_ready or self.closing:
+            return
+        self.model_attempted = True
+        self.model_loading, self.model_failed = True, False
+        self.status_item.title = f'Status: loading {self.model_id} — first use may download weights'
+        def worker():
+            try:
+                self.model_events.put((load_model(self.model_id), None))
+            except Exception:
+                log.exception('Unable to load model')
+                self.model_events.put((None, 'Model could not load — check internet and disk space, then Retry model loading'))
+        threading.Thread(target=worker, name='model-loader', daemon=True).start()
+
+    def show_setup(self, _sender):
+        if not self.idle():
+            self.status_item.title = 'Status: finish or cancel before checking setup'
+            return
+        from ApplicationServices import AXIsProcessTrusted
+        from Quartz import CGPreflightListenEventAccess
+        try:
+            input_access = bool(CGPreflightListenEventAccess())
+            accessibility = bool(AXIsProcessTrusted())
+            try:
+                with self.devices.lock:
+                    _, microphone = self.devices.resolve()
+            except Exception:
+                microphone = 'Unavailable — reconnect or choose another input'
+        except Exception:
+            self.status_item.title = 'Status: setup check failed — check microphone and permissions'
+            return
+        message = (
+            f'Model: {self.model_id} — {"ready" if self.model_ready else "not ready"}\n'
+            f'Microphone: {microphone}\n'
+            f'Microphone permission: {microphone_permission()}\n'
+            f'Input Monitoring: {"allowed" if input_access else "not allowed"}\n'
+            f'Accessibility insertion: {"allowed" if accessibility else "not allowed"}\n'
+            f'Shortcut: {self.values["shortcut"]}\n\n'
+            'A flat level meter can mean silence or mute; it is not proof of denied permission.\n\n'
+            'Grant the launching app (usually Terminal) access in System Settings → Privacy & Security. '
+            'Accessibility may be named Device Control and Data Access. Restart WhisperBar after changing access. '
+            'Copy Last works when automatic insertion is unavailable.'
+        )
+        with self.controller.lock:
+            if not self.idle():
+                return
+            self.setup_open = True
+        try:
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            rumps.alert('WhisperBar setup', message, ok='Done')
+        finally:
+            self.setup_open = False
 
     def on_press(self, key):
         try:
@@ -119,6 +214,14 @@ class WhisperBar(rumps.App):
         self.chord.release(self.listener.canonical(key))
 
     def process_events(self, _timer):
+        if self.closing:
+            return
+        if self.overlay is None:
+            try:
+                self.overlay = Overlay()
+            except Exception:
+                log.exception('Status panel unavailable; menu feedback remains active')
+                self.overlay = False
         if self.onboarding_pending:
             self.onboarding_pending = False
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -141,19 +244,51 @@ class WhisperBar(rumps.App):
         if self.history_dirty.is_set():
             self.history_dirty.clear()
             self.rebuild_history()
-        # All Cocoa mutations happen here or in menu callbacks on the main thread.
-        latest = None
+        if not self.model_attempted:
+            self.retry_model()
+        now = time.monotonic()
+        try:
+            model, error = self.model_events.get_nowait()
+        except Empty:
+            pass
+        else:
+            self.model_loading = False
+            self.model_failed = error is not None
+            if error:
+                self.status_item.title = 'Status: ' + error
+            else:
+                self.controller.recognize = Recognizer(model)
+                self.model_ready = True
+                self.ready_until = now + 5
+                self.status_item.title = 'Status: ' + (self.startup_warning or 'Ready — ' + self.values['shortcut'] + ' to dictate')
+                log.info('Model loaded. WhisperBar ready')
+        # Consume all transitions so repeated busy events do not reset elapsed time.
         while True:
             try:
-                latest = self.events.get_nowait()
+                event = self.events.get_nowait()
             except Empty:
                 break
-        if latest is not None and latest.session_id == self.controller.sequence:
-            icons = {State.IDLE: '🎙', State.ARMING: '⏳', State.RECORDING: '🔴',
-                     State.TRANSCRIBING: '⏳', State.DELIVERING: '⏳',
-                     State.CANCELLING: '⏳', State.ERROR: '⚠️', State.CLOSED: '🎙'}
-            self.title = icons[latest.state]
-            self.status_item.title = f'Status: {latest.message}'
+            if event.session_id == self.controller.sequence:
+                self.feedback.accept(event, now)
+                self.status_item.title = f'Status: {event.message}'
+        with self.audio_lock:
+            rms, sampled_at, last_sound_at = self.input_activity.latest
+        presentation = self.feedback.render(now, self.values['shortcut'], rms, sampled_at, last_sound_at)
+        if self.model_loading:
+            presentation = Presentation('Loading ' + self.model_id + '…',
+                'First use may download weights. You can keep using other apps.', '… Loading', True)
+        elif self.model_failed:
+            presentation = Presentation('Model needs attention',
+                'Check internet and disk space. Choose Retry model loading in the menu.', '⚠ Model', True)
+        elif now < self.ready_until and self.feedback.sequence < 0:
+            presentation = Presentation('WhisperBar ready', self.startup_warning or
+                (self.values['shortcut'] + ' to dictate · Esc to cancel'), '🎙', True)
+        if self.title != presentation.menu_title:
+            self.title = presentation.menu_title
+        if presentation.recording:
+            self.status_item.title = 'Status: ' + presentation.title + ' — ' + presentation.detail
+        if self.overlay:
+            self.overlay.show(presentation)
 
     def rebuild_mics(self):
         # Serialize the check and refresh against shortcut commands. Never reset
@@ -381,7 +516,7 @@ class WhisperBar(rumps.App):
                 keys = parse_shortcut(response.text)
                 with self.controller.lock:
                     if self.idle() and self.save_preferences(shortcut=response.text):
-                        self.chord = Chord(keys, self.controller.toggle)
+                        self.chord = Chord(keys, self.toggle_dictation)
                         self.shortcut_item.title = f'Shortcut: {response.text}'
             except Exception:
                 self.status_item.title = 'Status: invalid shortcut — previous setting kept'
@@ -391,6 +526,10 @@ class WhisperBar(rumps.App):
         rumps.quit_application()
 
     def shutdown(self):
+        self.closing = True
+        if self.overlay:
+            self.overlay.close()
+            self.overlay = None
         self.listener.stop()
         self.timer.stop()
         self.controller.close()
@@ -418,23 +557,13 @@ def main():
         try:
             preferences = Settings(data_directory())
             parse_shortcut(preferences.values['shortcut'])
-            if preferences.values['model'] not in whisper.available_models():
-                raise ValueError('Unsupported model preference')
             model_id = preferences.values['model']
         except Exception:
             log.exception('Settings unavailable; using defaults without history')
             preferences = None
             settings_error = 'Settings unavailable — defaults active, history off'
-        try:
-            model = whisper.load_model(model_id)
-        except Exception:
-            log.exception('Unable to load model')
-            print(f"WhisperBar could not load model '{model_id}'. First use requires "
-                  'internet and free disk space. Check whisperbar.log, then retry ./launch.sh.',
-                  file=sys.stderr)
-            return 1
-        app = WhisperBar(model, preferences, model_id, settings_error)
-        log.info('Model loaded. WhisperBar ready')
+        app = WhisperBar(None, preferences, model_id, settings_error)
+        log.info('Desktop starting; model loads after the menu is available')
         app.start()
         return 0
     finally:
